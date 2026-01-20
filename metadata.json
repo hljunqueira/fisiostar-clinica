@@ -1,0 +1,7 @@
+{
+  "name": "FisioStar",
+  "description": "Plataforma de gestão para clínicas de fisioterapia com múltiplas unidades, focada em organização, segurança e eficiência operacional.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
