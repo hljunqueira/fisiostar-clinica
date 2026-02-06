@@ -71,6 +71,7 @@ export interface PlanTemplate {
   active: boolean;
 }
 
+// ...
 export interface Professional {
   id: ProfessionalId;
   name: string;
@@ -79,6 +80,7 @@ export interface Professional {
   hourlyRate: number;
   unitIds: UnitId[];
   color: string; // For calendar visualization
+  avatarUrl?: string; // Foto do perfil do profissional
 }
 
 export interface Plan {
@@ -116,6 +118,9 @@ export interface Session {
   status: SessionStatus;
   notes?: string;
   signed?: boolean; // Novo campo para controle de assinatura
+  signatureUrl?: string; // URL da assinatura ou foto
+  isOutsidePlan?: boolean; // Sessão avulsa
+  price?: number; // Preço da sessão avulsa
 }
 
 // --- Avisos e Comunicação ---

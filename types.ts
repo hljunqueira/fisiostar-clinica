@@ -141,3 +141,13 @@ export interface SystemUser {
   avatarUrl?: string;
   customPermissions?: PermissionKey[]; // Permissões específicas que sobrescrevem a role
 }
+
+export interface Notification {
+  id: string;
+  userId: string;
+  title: string;
+  message: string;
+  read: boolean;
+  createdAt: string;
+  type: 'info' | 'warning' | 'success' | 'date';
+}

@@ -1,10 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar as CalendarIcon, Hash, Edit2, Trash2, XCircle } from 'lucide-react';
+import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar as CalendarIcon, Hash, Edit2, Trash2, XCircle, DollarSign } from 'lucide-react';
 
 
 import { UnitId, Patient, SessionStatus, PlanTemplate, Professional, Session, Unit } from '../types';
 import { patientsApi, planTemplatesApi, professionalsApi, sessionsApi, unitsApi } from '../src/services/api';
+import { maskPhone, maskCpf, validateCpf } from '../src/utils/masks';
+import { storageApi } from '../src/services/storage-api';
+import { revenuesApi } from '../src/services/financial-api';
 import toast from 'react-hot-toast';
 import SignatureModal from './SignatureModal';
 
@@ -28,10 +31,9 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
     const [address, setAddress] = useState(initialData?.address || '');
 
     // Treatment - find matching plan template by name if editing, roughly
-    // This is imperfect if plan names change, but good enough for now.
-    // Ideally we'd store planTemplateId on the patient plan.
     const [selectedPlanId, setSelectedPlanId] = useState(() => {
         if (initialData?.plan) {
+            if (initialData.plan.name === 'Particular / Avulso') return 'avulso';
             const match = planTemplates.find(p => p.name === initialData.plan.name);
             return match?.id || '';
         }
@@ -42,38 +44,35 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
+
+        const isAvulso = selectedPlanId === 'avulso';
         const planTemplate = planTemplates.find(p => p.id === selectedPlanId);
 
-        if (!name || !planTemplate) return;
-
-        // Provide fallback if keeping existing plan logic is preferred, but for now we overwrite/update plan if selected.
-        // If editing, we might want to keep existing expiration if plan didn't change, but simpler to just set new plan details if user selected one.
+        if (!name) return;
+        if (!planTemplate && !isAvulso) return;
 
         let planData = initialData?.plan;
 
-        // If user changed the plan dropdown or it's new
-        if (planTemplate) {
+        if (isAvulso) {
+            planData = {
+                name: 'Particular / Avulso',
+                totalSessions: 0,
+                remainingSessions: 0,
+                expiresAt: new Date(new Date().setFullYear(new Date().getFullYear() + 10)).toISOString() // Long expiry
+            };
+        } else if (planTemplate) {
             const expiresAt = new Date();
             expiresAt.setDate(expiresAt.getDate() + 30);
 
-            // If editing and plan name matches, maybe keep existing credits? 
-            // For simplicity, let's assume selecting a plan resets/updates terms. 
-            // Or better: validade if we really want to reset. 
-            // Let's assume for this "Edit" action we are updating basic info mainly.
-            // If plan is changed, we update plan.
-
-            planData = {
-                name: planTemplate.name,
-                totalSessions: planTemplate.sessions,
-                remainingSessions: planTemplate.sessions,
-                expiresAt: expiresAt.toISOString()
-            };
-
-            // If we are editing and the plan selected is the SAME as before, execute a merge or keep old?
-            // User request is general "Edit", often for typo in name or address.
-            // Responsive logic: If initialData exists and selectedPlan matches, keep existing plan status (credits/dates)
             if (initialData?.plan && initialData.plan.name === planTemplate.name) {
                 planData = initialData.plan;
+            } else {
+                planData = {
+                    name: planTemplate.name,
+                    totalSessions: planTemplate.sessions,
+                    remainingSessions: planTemplate.sessions,
+                    expiresAt: expiresAt.toISOString()
+                };
             }
         }
 
@@ -85,7 +84,7 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
             birthDate,
             address,
             city,
-            unitId: currentUnit, // Keep unit or update? Usually stays.
+            unitId: currentUnit,
             status: initialData?.status || 'Active',
             plan: planData!,
             lastVisit: initialData?.lastVisit,
@@ -113,143 +112,157 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
                     </button>
                 </div>
 
-                <form onSubmit={handleSubmit} className="overflow-y-auto">
-                    <div className="p-6 space-y-8">
+                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+                    {/* Section 1: Dados Pessoais */}
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
+                            <User className="w-4 h-4 text-blue-600" />
+                            Dados Pessoais
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nome Completo</label>
+                                <input
+                                    type="text"
+                                    required
+                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                    placeholder="Ex: João da Silva"
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">CPF</label>
+                                <div className="relative">
+                                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        maxLength={14}
+                                        className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400 ${cpf && !validateCpf(cpf) ? 'border-red-500 focus:ring-red-500' : 'border-gray-200'}`}
+                                        placeholder="000.000.000-00"
+                                        value={cpf}
+                                        onChange={e => setCpf(maskCpf(e.target.value))}
+                                    />
+                                    {cpf && !validateCpf(cpf) && (
+                                        <span className="text-xs text-red-500 absolute -bottom-4 left-0">CPF inválido</span>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Data de Nascimento</label>
+                                <div className="relative">
+                                    <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input
+                                        type="date"
+                                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                        value={birthDate}
+                                        onChange={e => setBirthDate(e.target.value)}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
 
-                        {/* Section 1: Dados Pessoais */}
-                        <div>
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
-                                <User className="w-4 h-4 text-blue-600" />
-                                Dados Pessoais
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="md:col-span-2">
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nome Completo</label>
+                    {/* Section 2: Contato e Endereço */}
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
+                            <MapPin className="w-4 h-4 text-blue-600" />
+                            Contato e Endereço
+                        </h3>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Telefone</label>
+                                <div className="relative">
+                                    <PhoneIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     <input
                                         type="text"
                                         required
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                        placeholder="Ex: João da Silva"
-                                        value={name}
-                                        onChange={e => setName(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">CPF</label>
-                                    <div className="relative">
-                                        <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input
-                                            type="text"
-                                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400"
-                                            placeholder="000.000.000-00"
-                                            value={cpf}
-                                            onChange={e => setCpf(e.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Data de Nascimento</label>
-                                    <div className="relative">
-                                        <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input
-                                            type="date"
-                                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                            value={birthDate}
-                                            onChange={e => setBirthDate(e.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Section 2: Contato e Endereço */}
-                        <div>
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
-                                <MapPin className="w-4 h-4 text-blue-600" />
-                                Contato e Endereço
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Telefone</label>
-                                    <div className="relative">
-                                        <PhoneIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input
-                                            type="text"
-                                            required
-                                            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                            placeholder="(00) 90000-0000"
-                                            value={phone}
-                                            onChange={e => setPhone(e.target.value)}
-                                        />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cidade</label>
-                                    <input
-                                        type="text"
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                        placeholder="Ex: Araranguá"
-                                        value={city}
-                                        onChange={e => setCity(e.target.value)}
-                                    />
-                                </div>
-                                <div className="md:col-span-2">
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1.5">Endereço Completo</label>
-                                    <input
-                                        type="text"
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                        placeholder="Rua, Número, Bairro"
-                                        value={address}
-                                        onChange={e => setAddress(e.target.value)}
+                                        maxLength={15}
+                                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                        placeholder="(00) 90000-0000"
+                                        value={phone}
+                                        onChange={e => setPhone(maskPhone(e.target.value))}
                                     />
                                 </div>
                             </div>
-                        </div>
-
-                        {/* Section 3: Plano */}
-                        <div>
-                            <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
-                                <CreditCard className="w-4 h-4 text-blue-600" />
-                                Plano de Tratamento
-                            </h3>
-                            <div className="relative">
-                                <select
-                                    required
-                                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 appearance-none shadow-sm"
-                                    value={selectedPlanId}
-                                    onChange={e => setSelectedPlanId(e.target.value)}
-                                >
-                                    <option value="">Selecione um plano inicial...</option>
-                                    {activePlans.map(plan => (
-                                        <option key={plan.id} value={plan.id}>
-                                            {plan.name} - {plan.sessions} sessões - R$ {plan.price.toFixed(2)}
-                                        </option>
-                                    ))}
-                                </select>
-                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none">
-                                    <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                </div>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cidade</label>
+                                <input
+                                    type="text"
+                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                    placeholder="Ex: Araranguá"
+                                    value={city}
+                                    onChange={e => setCity(e.target.value)}
+                                />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Endereço Completo</label>
+                                <input
+                                    type="text"
+                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                    placeholder="Rua, Número, Bairro"
+                                    value={address}
+                                    onChange={e => setAddress(e.target.value)}
+                                />
                             </div>
                         </div>
                     </div>
 
-                    <div className="p-6 pt-0 flex justify-end gap-3 bg-white sticky bottom-0">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
-                        >
-                            <Save className="w-4 h-4" />
-                            Salvar Prontuário
-                        </button>
+                    {/* Section 3: Plano */}
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-blue-600" />
+                            Plano de Tratamento
+                        </h3>
+
+                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                            <div className="mb-4">
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Selecione o Plano ou Modalidade</label>
+                                <div className="relative">
+                                    <select
+                                        value={selectedPlanId}
+                                        onChange={e => setSelectedPlanId(e.target.value)}
+                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none appearance-none bg-white font-medium text-gray-700"
+                                        required
+                                    >
+                                        <option value="">Selecione...</option>
+                                        <option value="avulso" className="font-bold text-blue-700">✨ Atendimento Avulso / Particular</option>
+                                        <optgroup label="Planos Disponíveis">
+                                            {activePlans.map(plan => (
+                                                <option key={plan.id} value={plan.id}>{plan.name} - {plan.sessions} sessões</option>
+                                            ))}
+                                        </optgroup>
+                                    </select>
+                                    <div className="absolute left-3 top-3 text-gray-400 pointer-events-none">
+                                        <Hash className="w-4 h-4" />
+                                    </div>
+                                </div>
+                                <p className="text-xs text-gray-500 mt-2">
+                                    Selecione "Avulso" para pacientes que pagam por sessão ou não possuem pacote fechado.
+                                </p>
+                            </div>
+                        </div>
                     </div>
                 </form>
+
+                {/* Footer */}
+                <div className="p-6 pt-0 flex justify-end gap-3 bg-white sticky bottom-0">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                    >
+                        Cancelar
+                    </button>
+                    <button
+                        type="submit"
+                        onClick={handleSubmit}
+                        className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
+                    >
+                        <Save className="w-4 h-4" />
+                        Salvar Prontuário
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -263,7 +276,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
         unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('FisioStar'));
     }, [currentUnit]);
 
-    const [activeTab, setActiveTab] = useState<'info' | 'signatures'>('signatures');
+    const [activeTab, setActiveTab] = useState<'info' | 'signatures' | 'financial'>('signatures');
     const [currentPhoto, setCurrentPhoto] = useState(patient.photoUrl);
     const [showCamera, setShowCamera] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -317,7 +330,21 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
             if (ctx) {
                 ctx.drawImage(videoRef.current, 0, 0);
                 const dataUrl = canvas.toDataURL('image/jpeg');
-                setCurrentPhoto(dataUrl);
+
+                // Upload photo
+                (async () => {
+                    try {
+                        const fileName = `patient-${patient.id}-${Date.now()}.jpg`;
+                        const publicUrl = await storageApi.uploadBase64('patient-photos', fileName, dataUrl);
+                        await patientsApi.update(patient.id, { photoUrl: publicUrl });
+                        setCurrentPhoto(publicUrl);
+                        toast.success('Foto capturada e salva!');
+                    } catch (error) {
+                        console.error('Error uploading photo:', error);
+                        toast.error('Erro ao salvar foto');
+                    }
+                })();
+
                 handleStopCamera();
             }
         }
@@ -336,10 +363,35 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
     const handleConfirmSignature = async (imageData: string, type: 'signature' | 'photo') => {
         if (!sessionToSign) return;
         try {
-            // In the future, imageData could be saved to a signature_image column
-            await sessionsApi.update(sessionToSign, { signed: true });
+            const session = patientHistory.find(s => s.id === sessionToSign);
+            const fileName = `session-${sessionToSign}-${type}-${Date.now()}.png`;
+            const publicUrl = await storageApi.uploadBase64('signatures', fileName, imageData);
+
+            await sessionsApi.update(sessionToSign, {
+                signed: true,
+                signatureUrl: publicUrl
+            });
+
+            // Automatically create revenue if it's an outside plan session
+            if (session?.isOutsidePlan && session.price) {
+                try {
+                    await revenuesApi.create({
+                        unitId: currentUnit,
+                        patientId: patient.id,
+                        category: 'session',
+                        description: `Sessão Avulsa - ${session.type} - ${patient.name}`,
+                        amount: session.price,
+                        revenueDate: new Date().toISOString().split('T')[0]
+                    });
+                    toast.success('Financeiro atualizado com sucesso!');
+                } catch (err) {
+                    console.error('Error creating revenue:', err);
+                    toast.error('Erro ao gerar lançamento financeiro');
+                }
+            }
+
             setPatientHistory(prev => prev.map(s =>
-                s.id === sessionToSign ? { ...s, signed: true } : s
+                s.id === sessionToSign ? { ...s, signed: true, signatureUrl: publicUrl } : s
             ));
             toast.success(`Assinatura confirmada via ${type === 'signature' ? 'desenho' : 'foto'}!`);
             setShowSignatureModal(false);
@@ -357,7 +409,6 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
     };
 
     const handlePrint = () => {
-        // const unitName = UNITS.find(u => u.id === currentUnit)?.name || 'FisioStar'; // Removed
         const printWindow = window.open('', '', 'width=900,height=700');
 
         if (!printWindow) {
@@ -477,24 +528,50 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden relative z-10 flex flex-col md:flex-row animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden relative z-10 flex flex-col md:flex-row animate-fade-in">
                 <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/50 hover:bg-white rounded-full text-gray-500 hover:text-gray-900 z-20">
                     <X className="w-5 h-5" />
                 </button>
 
                 {/* Left Sidebar: Photo & Key Info */}
-                <div className="w-full md:w-80 bg-gray-50 border-r border-gray-200 p-6 flex flex-col items-center">
+                <div className="w-full md:w-72 bg-gray-50 border-r border-gray-200 p-6 flex flex-col items-center flex-shrink-0">
                     <div className="relative group mb-4">
-                        {currentPhoto ? (
-                            <img src={currentPhoto} alt={patient.name} className="w-32 h-32 rounded-full object-cover shadow-md border-4 border-white" />
-                        ) : (
-                            <div className="w-32 h-32 rounded-full bg-blue-200 flex items-center justify-center text-blue-600 font-bold text-4xl shadow-md border-4 border-white">
-                                {patient.name.charAt(0)}
-                            </div>
-                        )}
+                        <div className="w-32 h-32 rounded-full overflow-hidden shadow-md border-4 border-white relative bg-white">
+                            {currentPhoto ? (
+                                <img src={currentPhoto} alt={patient.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-4xl">
+                                    {patient.name.charAt(0)}
+                                </div>
+                            )}
+
+                            {/* File Upload Overlay */}
+                            <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                                <UploadCloud className="w-8 h-8 text-white" />
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        if (!file) return;
+                                        try {
+                                            const publicUrl = await storageApi.uploadFile('patient-photos', `patient-${patient.id}-${Date.now()}`, file);
+                                            await patientsApi.update(patient.id, { photoUrl: publicUrl });
+                                            setCurrentPhoto(publicUrl);
+                                            toast.success('Foto atualizada!');
+                                        } catch (err) {
+                                            console.error(err);
+                                            toast.error('Erro ao enviar foto');
+                                        }
+                                    }}
+                                />
+                            </label>
+                        </div>
+
                         <button
                             onClick={handleStartCamera}
-                            className="absolute bottom-0 right-0 p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg transition-transform hover:scale-105"
+                            className="absolute bottom-0 right-0 p-2 bg-primary text-white rounded-full hover:bg-primary-hover shadow-lg transition-transform hover:scale-105 z-10"
                             title="Tirar foto com câmera"
                         >
                             <Camera className="w-4 h-4" />
@@ -504,119 +581,99 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                     <h2 className="text-xl font-bold text-center text-gray-900">{patient.name}</h2>
                     <span className="text-sm text-gray-500 mb-6">{patient.phone}</span>
 
-                    <div className="w-full space-y-3">
-                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Plano Ativo</p>
-                            <p className="font-medium text-blue-700">{patient.plan.name}</p>
-                        </div>
-                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Saldo</p>
-                            <p className="font-medium text-gray-900">{patient.plan.remainingSessions} de {patient.plan.totalSessions} sessões</p>
-                        </div>
-                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
-                            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Pagamento</p>
-                            <div className="flex items-center justify-between mt-1">
-                                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${patient.plan.remainingSessions === patient.plan.totalSessions ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
-                                    {patient.plan.remainingSessions === patient.plan.totalSessions ? 'Pendente' : 'Confirmado'}
-                                </span>
-                                {patient.plan.remainingSessions === patient.plan.totalSessions && (
-                                    <button
-                                        onClick={() => setShowPaymentSignatureModal(true)}
-                                        className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
-                                    >
-                                        Assinar
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-auto w-full pt-6">
-                        <button className="w-full py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
-                            <UploadCloud className="w-4 h-4" />
-                            Upload Documento
-                        </button>
+                    <div className="w-full border-t border-gray-200 pt-4 mt-auto hidden md:block">
+                        <p className="text-xs text-center text-gray-400">Cadastrado em {new Date().toLocaleDateString('pt-BR')}</p>
                     </div>
                 </div>
 
                 {/* Right Content: Tabs */}
                 <div className="flex-1 flex flex-col min-h-0 bg-white">
                     <div className="border-b border-gray-200">
-                        <nav className="flex gap-6 px-6" aria-label="Tabs">
+                        <nav className="flex px-6" aria-label="Tabs">
                             <button
                                 onClick={() => setActiveTab('signatures')}
-                                className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'signatures' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                                className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'signatures' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                             >
                                 <FileSignature className="w-4 h-4" />
-                                Ficha de Assinaturas
+                                Histórico & Assinaturas
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('financial')}
+                                className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'financial' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                            >
+                                <CreditCard className="w-4 h-4" />
+                                Financeiro & Plano
                             </button>
                             <button
                                 onClick={() => setActiveTab('info')}
-                                className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'info' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                                className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'info' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                             >
                                 <User className="w-4 h-4" />
-                                Dados Cadastrais
+                                Dados Pessoais
                             </button>
                         </nav>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6">
+                    <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
                         {activeTab === 'signatures' && (
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-center bg-gray-50 p-4 rounded-lg border border-gray-200">
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="flex justify-between items-center bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
                                     <div>
-                                        <h3 className="font-bold text-gray-900">Gestão de Assinaturas Físicas</h3>
-                                        <p className="text-sm text-gray-600">Imprima a ficha de presença para que o paciente assine fisicamente.</p>
+                                        <h3 className="font-bold text-gray-900">Ficha de Presença</h3>
+                                        <p className="text-sm text-gray-600">Imprima a ficha para controle físico de assinaturas.</p>
                                     </div>
                                     <button
                                         onClick={handlePrint}
-                                        className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium shadow-sm transition-colors text-sm flex items-center gap-2"
+                                        className="bg-gray-50 border border-gray-200 text-gray-700 hover:bg-white hover:border-blue-300 hover:text-blue-600 px-4 py-2 rounded-lg font-medium transition-all text-sm flex items-center gap-2"
                                     >
                                         <Printer className="w-4 h-4" />
-                                        Imprimir Ficha
+                                        Imprimir
                                     </button>
                                 </div>
 
                                 <div>
-                                    <h3 className="font-semibold text-gray-900 mb-4">Histórico de Sessões</h3>
-                                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                                    <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                        <Clock className="w-4 h-4 text-primary" />
+                                        Histórico de Atendimentos
+                                    </h3>
+                                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                                         {patientHistory.length > 0 ? (
                                             <table className="w-full text-sm text-left">
                                                 <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
                                                     <tr>
-                                                        <th className="px-4 py-3">Data</th>
-                                                        <th className="px-4 py-3">Procedimento</th>
-                                                        <th className="px-4 py-3">Profissional</th>
-                                                        <th className="px-4 py-3 text-center">Assinatura</th>
-                                                        <th className="px-4 py-3 text-right">Ação</th>
+                                                        <th className="px-5 py-3">Data/Hora</th>
+                                                        <th className="px-5 py-3">Procedimento</th>
+                                                        <th className="px-5 py-3">Profissional</th>
+                                                        <th className="px-5 py-3 text-center">Status</th>
+                                                        <th className="px-5 py-3 text-right">Ação</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {patientHistory.map(session => {
                                                         const prof = professionals.find(p => p.id === session.professionalId);
                                                         return (
-                                                            <tr key={session.id} className="hover:bg-gray-50">
-                                                                <td className="px-4 py-3 font-medium text-gray-900">
+                                                            <tr key={session.id} className="hover:bg-gray-50 transition-colors">
+                                                                <td className="px-5 py-3 font-medium text-gray-900">
                                                                     {new Date(session.date).toLocaleDateString('pt-BR')} <span className="text-gray-400 font-normal ml-1">{session.time}</span>
                                                                 </td>
-                                                                <td className="px-4 py-3 text-gray-600">{session.type}</td>
-                                                                <td className="px-4 py-3 text-gray-600">{prof?.name}</td>
-                                                                <td className="px-4 py-3 text-center">
+                                                                <td className="px-5 py-3 text-gray-600">{session.type}</td>
+                                                                <td className="px-5 py-3 text-gray-600">{prof?.name || '-'}</td>
+                                                                <td className="px-5 py-3 text-center">
                                                                     {session.signed ? (
-                                                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-100">
+                                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-100">
                                                                             <CheckCircle className="w-3 h-3" /> Assinado
                                                                         </span>
                                                                     ) : (
-                                                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-orange-50 text-orange-700 text-xs font-medium border border-orange-100">
+                                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-50 text-orange-700 text-xs font-medium border border-orange-100">
                                                                             <Clock className="w-3 h-3" /> Pendente
                                                                         </span>
                                                                     )}
                                                                 </td>
-                                                                <td className="px-4 py-3 text-right">
+                                                                <td className="px-5 py-3 text-right">
                                                                     {!session.signed && (
                                                                         <button
                                                                             onClick={() => handleOpenSignatureModal(session.id)}
-                                                                            className="text-emerald-600 hover:text-emerald-800 font-medium text-xs border border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 px-2 py-1 rounded transition-colors flex items-center gap-1 ml-auto"
+                                                                            className="text-primary hover:text-primary-hover font-medium text-xs border border-primary/20 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded transition-all flex items-center gap-1 ml-auto"
                                                                             title="Assinar digitalmente"
                                                                         >
                                                                             <Check className="w-3 h-3" />
@@ -630,8 +687,11 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                                                 </tbody>
                                             </table>
                                         ) : (
-                                            <div className="p-8 text-center text-gray-400">
-                                                Nenhuma sessão registrada.
+                                            <div className="p-10 text-center text-gray-400 flex flex-col items-center gap-3">
+                                                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                                                    <CalendarIcon className="w-6 h-6 text-gray-300" />
+                                                </div>
+                                                Nenhuma sessão registrada neste histórico.
                                             </div>
                                         )}
                                     </div>
@@ -639,32 +699,106 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                             </div>
                         )}
 
-                        {activeTab === 'info' && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div className="space-y-4">
-                                    <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">Informações Pessoais</h3>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500">Nome Completo</label>
-                                        <input type="text" value={patient.name} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" />
+                        {activeTab === 'financial' && (
+                            <div className="space-y-6 animate-fade-in">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {/* Plan Details Card */}
+                                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                                        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-4 -mt-4 opacity-50"></div>
+                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 relative z-10">Plano Atual</h3>
+                                        <div className="relative z-10">
+                                            <p className="text-2xl font-bold text-gray-900 mb-1">{patient.plan.name}</p>
+                                            <div className="flex items-center gap-2">
+                                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${patient.plan.remainingSessions > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                    {patient.plan.remainingSessions > 0 ? 'Ativo' : 'Esgotado'}
+                                                </span>
+                                                <span className="text-sm text-gray-500">Expira em: {new Date(patient.plan.expiresAt).toLocaleDateString('pt-BR')}</span>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500">Telefone</label>
-                                        <input type="text" value={patient.phone} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500">CPF</label>
-                                        <input type="text" value={patient.cpf || ''} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" placeholder="Não informado" />
+
+                                    {/* Balance Card */}
+                                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Saldo de Sessões</h3>
+                                        <div className="flex items-end gap-3 mb-2">
+                                            <span className="text-4xl font-bold text-primary">{patient.plan.remainingSessions}</span>
+                                            <span className="text-gray-400 font-medium mb-1">/ {patient.plan.totalSessions}</span>
+                                        </div>
+                                        <div className="w-full bg-gray-100 rounded-full h-2">
+                                            <div
+                                                className="bg-primary h-2 rounded-full transition-all duration-500"
+                                                style={{ width: `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="space-y-4">
-                                    <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">Endereço</h3>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500">Cidade</label>
-                                        <input type="text" value={patient.city || ''} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" placeholder="Não informado" />
+
+                                {/* Payment Actions */}
+                                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                                    <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                        <DollarSign className="w-5 h-5 text-green-600" />
+                                        Status do Pagamento
+                                    </h3>
+
+                                    <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                        <div>
+                                            <p className="font-semibold text-gray-900">Mensalidade Atual</p>
+                                            <p className="text-sm text-gray-500">Valor referente ao pacote de {patient.plan.name}</p>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <span className={`px-3 py-1 rounded-full text-sm font-bold border ${patient.plan.remainingSessions === patient.plan.totalSessions ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                                                {patient.plan.remainingSessions === patient.plan.totalSessions ? 'Pendente' : 'Pago Confirmado'}
+                                            </span>
+
+                                            {patient.plan.remainingSessions === patient.plan.totalSessions && (
+                                                <button
+                                                    onClick={() => setShowPaymentSignatureModal(true)}
+                                                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium text-sm shadow-sm transition-colors flex items-center gap-2"
+                                                >
+                                                    <FileSignature className="w-4 h-4" />
+                                                    Confirmar Pagamento
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-medium text-gray-500">Endereço</label>
-                                        <input type="text" value={patient.address || ''} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" placeholder="Não informado" />
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'info' && (
+                            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm animate-fade-in">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="space-y-4">
+                                        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
+                                            <User className="w-4 h-4 text-gray-400" />
+                                            Informações Pessoais
+                                        </h3>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Nome Completo</label>
+                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.name}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Telefone</label>
+                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.phone}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">CPF</label>
+                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.cpf || '-'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
+                                            <MapPin className="w-4 h-4 text-gray-400" />
+                                            Endereço
+                                        </h3>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Cidade</label>
+                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.city || '-'}</p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Endereço Completo</label>
+                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.address || '-'}</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -672,12 +806,9 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                     </div>
 
                     {/* Modal Footer */}
-                    <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
-                        <button onClick={onClose} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50">
+                    <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 rounded-b-2xl">
+                        <button onClick={onClose} className="px-5 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors">
                             Fechar
-                        </button>
-                        <button className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-sm">
-                            Salvar Alterações
                         </button>
                     </div>
                 </div>
@@ -775,11 +906,24 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
         }
     }
 
+    const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
+    const [planFilter, setPlanFilter] = useState<'All' | 'ActivePlan' | 'ExpiredPlan'>('All');
+
     const filteredPatients = patientsList.filter(patient => {
-        // const matchesUnit = patient.unitId === currentUnit; // Removed: Show all patients globally
         const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (patient.cpf && patient.cpf.includes(searchTerm));
-        return matchesSearch;
+
+        const matchesStatus = statusFilter === 'All'
+            ? true
+            : patient.status === statusFilter;
+
+        const matchesPlan = planFilter === 'All'
+            ? true
+            : planFilter === 'ActivePlan'
+                ? patient.plan.remainingSessions > 0
+                : patient.plan.remainingSessions === 0;
+
+        return matchesSearch && matchesStatus && matchesPlan;
     });
 
     const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
@@ -844,33 +988,49 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                 </div>
                 <button
                     onClick={() => { setEditingPatient(null); setIsCreateModalOpen(true); }}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm"
+                    className="bg-primary hover:bg-primary-hover text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm shadow-primary/30"
                 >
                     <UserPlus className="w-4 h-4" />
                     Novo Paciente
                 </button>
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex flex-col md:flex-row gap-4">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <input
                         type="text"
                         placeholder="Buscar por nome ou CPF..."
-                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="input-primary pl-10"
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
                     />
                 </div>
-                <button className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center gap-2">
-                    <Filter className="w-4 h-4" />
-                    Filtros
-                </button>
+                <div className="flex gap-2">
+                    <select
+                        value={statusFilter}
+                        onChange={(e) => setStatusFilter(e.target.value as any)}
+                        className="input-primary w-auto min-w-[140px]"
+                    >
+                        <option value="All">Todos Status</option>
+                        <option value="Active">Ativos</option>
+                        <option value="Inactive">Inativos</option>
+                    </select>
+                    <select
+                        value={planFilter}
+                        onChange={(e) => setPlanFilter(e.target.value as any)}
+                        className="input-primary w-auto min-w-[140px]"
+                    >
+                        <option value="All">Todos Planos</option>
+                        <option value="ActivePlan">Plano Ativo</option>
+                        <option value="ExpiredPlan">Sem Sessões</option>
+                    </select>
+                </div>
             </div>
 
             {loading ? (
                 <div className="flex justify-center p-8 text-gray-500">Carregando pacientes...</div>
-            ) : (
+            ) : filteredPatients.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredPatients.map(patient => (
                         <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer group relative">
@@ -919,7 +1079,7 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                             </div>
 
                             {/* Action Buttons */}
-                            < div className="flex justify-end gap-2 pt-3 border-t border-gray-50 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" >
+                            < div className="flex justify-end gap-2 pt-3 border-t border-gray-50 opacity-100 transition-opacity" >
                                 <button
                                     onClick={(e) => openEditModal(patient, e)}
                                     className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -943,9 +1103,24 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                                 </button>
                             </div>
                         </div>
-                    ))
-                    }
-                </div >
+                    ))}
+                </div>
+            ) : (
+                <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                        <User className="w-8 h-8 text-gray-400" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-1">Nenhum paciente encontrado</h3>
+                    <p className="text-gray-500 max-w-sm">
+                        Não encontramos nenhum paciente correspondente aos filtros selecionados.
+                    </p>
+                    <button
+                        onClick={() => { setSearchTerm(''); setStatusFilter('All'); setPlanFilter('All'); }}
+                        className="mt-6 text-primary hover:text-primary-hover font-medium text-sm transition-colors"
+                    >
+                        Limpar todos os filtros
+                    </button>
+                </div>
             )}
 
             {

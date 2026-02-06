@@ -252,44 +252,63 @@ const Dashboard: React.FC<DashboardProps> = ({
               </button>
             </div>
 
-            <h3 className="font-semibold text-gray-900 mb-3 border-t pt-4 border-gray-100 flex items-center gap-2">
-              <Clock className="h-4 w-4 text-blue-600" />
+            <h3 className="font-semibold text-gray-900 mb-4 border-t pt-5 border-gray-100 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-primary" />
               Aulas Restantes
             </h3>
-            <div className="flex-1 overflow-y-auto space-y-3 max-h-64">
+            <div className="flex-1 overflow-y-auto space-y-3 max-h-80 pr-1 custom-scrollbar">
               {patientsWithPlans.map(patient => {
                 const isExpired = new Date(patient.plan!.expiresAt) < new Date();
                 const expiresSoon = new Date(patient.plan!.expiresAt) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
                 const expDateFormatted = new Date(patient.plan!.expiresAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
                 return (
-                  <div key={patient.id} className={`p-3 rounded-lg border ${isExpired ? 'bg-red-50 border-red-200' :
-                    expiresSoon ? 'bg-yellow-50 border-yellow-200' :
-                      'bg-gray-50 border-gray-200'
+                  <div key={patient.id} className={`p-3 rounded-lg border flex items-center justify-between transition-colors hover:bg-gray-50 ${isExpired ? 'bg-red-50/50 border-red-100' :
+                    expiresSoon ? 'bg-orange-50/50 border-orange-100' :
+                      'bg-white border-gray-100'
                     }`}>
-                    <p className="font-medium text-sm text-gray-900">{patient.name}</p>
-                    <p className="text-xs text-gray-600">{patient.plan!.name}</p>
-                    <div className="flex items-center gap-2 mt-1 text-xs">
-                      <span className="font-semibold">
-                        {patient.plan!.remainingSessions} restantes
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold ${isExpired ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}`}>
+                        {patient.photoUrl ? (
+                          <img src={patient.photoUrl} alt={patient.name} className="w-full h-full rounded-full object-cover" />
+                        ) : (
+                          patient.name.charAt(0)
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-sm text-gray-900">{patient.name}</p>
+                        <p className="text-xs text-gray-500">{patient.plan!.name}</p>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${patient.plan!.remainingSessions === 0 ? 'bg-gray-100 text-gray-600' : 'bg-blue-50 text-blue-700'
+                        }`}>
+                        {patient.plan!.remainingSessions} left
                       </span>
-                      <span className="text-gray-400">•</span>
-                      {isExpired ? (
-                        <span className="text-red-600 font-medium flex items-center gap-1">
-                          <AlertTriangle className="h-3 w-3" />
-                          Expirado
-                        </span>
-                      ) : (
-                        <span className={expiresSoon ? 'text-yellow-700' : 'text-gray-500'}>
-                          Exp: {expDateFormatted}
-                        </span>
-                      )}
+                      <div className="mt-1">
+                        {isExpired ? (
+                          <span className="text-[10px] text-red-600 font-medium flex items-center justify-end gap-1">
+                            <AlertTriangle className="h-3 w-3" />
+                            Expirado
+                          </span>
+                        ) : (
+                          <span className={`text-[10px] block ${expiresSoon ? 'text-orange-600 font-medium' : 'text-gray-400'}`}>
+                            Exp: {expDateFormatted}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
               })}
               {patientsWithPlans.length === 0 && (
-                <p className="text-sm text-gray-400 italic text-center py-4">Nenhum plano ativo.</p>
+                <div className="flex flex-col items-center justify-center py-8 text-center bg-gray-50 rounded-lg border border-dashed border-gray-200">
+                  <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center mb-2">
+                    <Users className="w-5 h-5 text-gray-400" />
+                  </div>
+                  <p className="text-sm text-gray-500 font-medium">Nenhum plano ativo.</p>
+                </div>
               )}
             </div>
           </div>
@@ -352,24 +371,34 @@ const Dashboard: React.FC<DashboardProps> = ({
 
 const KpiCard = ({ title, value, icon, trend, color, alert = false }: any) => {
   const bgColors: any = {
-    blue: 'bg-blue-50',
-    green: 'bg-emerald-50',
-    purple: 'bg-purple-50',
-    orange: 'bg-orange-50',
+    blue: 'bg-blue-50 text-blue-600',
+    green: 'bg-emerald-50 text-emerald-600',
+    purple: 'bg-purple-50 text-purple-600',
+    orange: 'bg-orange-50 text-orange-600',
   };
 
+  const iconColors: any = {
+    blue: 'text-blue-600 dark:text-blue-300',
+    green: 'text-emerald-600 dark:text-emerald-300',
+    purple: 'text-purple-600 dark:text-purple-300',
+    orange: 'text-orange-600 dark:text-orange-300',
+  }
+
   return (
-    <div className={`bg-white p-5 rounded-xl border ${alert ? 'border-orange-200 ring-2 ring-orange-50' : 'border-gray-200'} shadow-sm transition-all hover:shadow-md`}>
-      <div className="flex justify-between items-start mb-2">
-        <div className={`p-2 rounded-lg ${bgColors[color]}`}>
-          {icon}
+    <div className={`bg-white dark:bg-slate-800 p-6 rounded-xl border ${alert ? 'border-orange-200 ring-2 ring-orange-50 dark:border-orange-900/50 dark:ring-orange-900/20' : 'border-gray-200 dark:border-slate-700'} shadow-card hover:shadow-lg transition-all duration-300 group`}>
+      <div className="flex justify-between items-start mb-4">
+        <div>
+          <p className="text-xs font-bold text-gray-500 dark:text-slate-400 uppercase tracking-wider mb-1">{title}</p>
+          <h3 className="text-3xl font-bold text-gray-900 dark:text-white tracking-tight">{value}</h3>
         </div>
-        {alert && <span className="h-2 w-2 rounded-full bg-orange-500 animate-pulse" />}
+        <div className={`p-3 rounded-lg ${bgColors[color]} group-hover:scale-110 transition-transform`}>
+          {React.cloneElement(icon, { className: `w-6 h-6 ${iconColors[color]}` })}
+        </div>
       </div>
-      <div>
-        <p className="text-sm font-medium text-gray-500">{title}</p>
-        <h3 className="text-2xl font-bold text-gray-900 mt-1">{value}</h3>
-        <p className={`text-xs mt-1 ${alert ? 'text-orange-600 font-medium' : 'text-gray-400'}`}>
+
+      <div className="flex items-center gap-2">
+        {alert && <span className="flex h-2 w-2 rounded-full bg-orange-500 animate-pulse" />}
+        <p className={`text-xs font-medium ${alert ? 'text-orange-700 dark:text-orange-400' : 'text-gray-400 dark:text-slate-500'}`}>
           {trend}
         </p>
       </div>

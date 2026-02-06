@@ -33,6 +33,8 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
     const [type, setType] = useState<string>(editingSession?.type || '');
     const [notes, setNotes] = useState<string>(editingSession?.notes || '');
     const [status, setStatus] = useState<SessionStatus>(editingSession?.status || SessionStatus.SCHEDULED);
+    const [isOutsidePlan, setIsOutsidePlan] = useState<boolean>(editingSession?.isOutsidePlan || false);
+    const [price, setPrice] = useState<string>(editingSession?.price?.toString() || '');
 
     // Load data when modal opens
     useEffect(() => {
@@ -89,7 +91,9 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
             type: type,
             status: status,
             notes: notes,
-            signed: editingSession?.signed || false
+            signed: editingSession?.signed || false,
+            isOutsidePlan: isOutsidePlan,
+            price: isOutsidePlan && price ? parseFloat(price) : undefined
         };
 
         onSave(sessionData);
@@ -171,6 +175,39 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
                                 </div>
                             </div>
                         )}
+
+                        <div className="flex items-center gap-2 mt-2">
+                            <input
+                                type="checkbox"
+                                id="isOutsidePlan"
+                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                                checked={isOutsidePlan}
+                                onChange={(e) => setIsOutsidePlan(e.target.checked)}
+                            />
+                            <label htmlFor="isOutsidePlan" className="text-sm text-gray-700 select-none">
+                                Agendamento Avulso (Fora do Plano)
+                            </label>
+                        </div>
+
+                        {isOutsidePlan && (
+                            <div className="mt-2 animate-fade-in">
+                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Valor da Sessão (R$)</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">R$</span>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                        value={price}
+                                        onChange={(e) => setPrice(e.target.value)}
+                                        placeholder="0,00"
+                                        required={isOutsidePlan}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
                     </div>
 
                     <div className="border-t border-gray-100 my-4"></div>

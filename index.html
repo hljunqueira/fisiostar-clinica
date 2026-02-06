@@ -12,6 +12,7 @@
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <script>
     tailwind.config = {
+      darkMode: 'class',
       theme: {
         extend: {
           fontFamily: {
@@ -22,15 +23,22 @@
               DEFAULT: '#2563EB', // Blue 600
               hover: '#1D4ED8', // Blue 700
               light: '#DBEAFE', // Blue 100
+              50: '#EFF6FF',
+              600: '#2563EB',
+              700: '#1D4ED8',
             },
-            success: {
-              DEFAULT: '#10B981', // Emerald 500
+            secondary: {
+              DEFAULT: '#475569', // Slate 600
             },
-            neutral: {
-              bg: '#F9FAFB', // Slate 50
-            },
-            alert: '#F97316', // Orange 500
+            success: '#10B981', // Emerald 500
+            warning: '#F59E0B', // Amber 500
             danger: '#EF4444', // Red 500
+            background: '#F9FAFB', // Gray 50
+            surface: '#FFFFFF',
+          },
+          boxShadow: {
+            'card': '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 4px -2px rgba(0, 0, 0, 0.02)',
+            'nav': '2px 0 8px rgba(0, 0, 0, 0.02)',
           }
         }
       }
@@ -38,14 +46,49 @@
   </script>
   <style>
     body {
-      background-color: #F9FAFB;
-      color: #111827;
+      background-color: #F8FAFC;
+      /* Slate 50 */
+      color: #0F172A;
+      /* Slate 900 */
+      font-feature-settings: "cv11", "ss01";
+      -webkit-font-smoothing: antialiased;
     }
 
-    /* Custom Scrollbar for cleaner look */
+    /* Global Transitions */
+    a,
+    button,
+    input,
+    select {
+      transition-property: all;
+      transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+      transition-duration: 200ms;
+    }
+
+    /* Standardized Input Styles via CSS Class since we can't use @apply easily with CDN */
+    .input-primary {
+      display: block;
+      width: 100%;
+      border-radius: 0.5rem;
+      border: 1px solid #E2E8F0;
+      /* Slate 200 */
+      background-color: #FFFFFF;
+      padding: 0.625rem 0.875rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+      color: #0F172A;
+    }
+
+    .input-primary:focus {
+      outline: 2px solid transparent;
+      outline-offset: 2px;
+      border-color: #2563EB;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    /* Custom Scrollbar */
     ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
+      width: 8px;
+      height: 8px;
     }
 
     ::-webkit-scrollbar-track {
@@ -54,11 +97,13 @@
 
     ::-webkit-scrollbar-thumb {
       background: #CBD5E1;
-      border-radius: 3px;
+      /* Slate 300 */
+      border-radius: 4px;
     }
 
     ::-webkit-scrollbar-thumb:hover {
       background: #94A3B8;
+      /* Slate 400 */
     }
   </style>
 </head>

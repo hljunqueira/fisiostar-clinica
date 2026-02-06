@@ -4,9 +4,10 @@ import { ConfirmModal } from './ConfirmModal';
 import { UserRole, RolePermissions, PermissionKey, SystemUser, PlanTemplate, Specialty } from '../types';
 import {
     Shield, UserCog, Save,
-    Layout, Users, CreditCard, Plus, Trash2, Edit3, X, Tag, FileText, ArrowLeft, ChevronRight
+    Layout, Users, CreditCard, Plus, Trash2, Edit3, X, Tag, FileText, ArrowLeft, ChevronRight, UploadCloud
 } from 'lucide-react';
 import { systemUsersApi, planTemplatesApi, specialtiesApi } from '../src/services/api';
+import { storageApi } from '../src/services/storage-api';
 import { toast } from 'react-hot-toast';
 
 interface SettingsProps {
@@ -67,6 +68,7 @@ const Settings: React.FC<SettingsProps> = ({
     const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
     const [editingPlan, setEditingPlan] = useState<Partial<PlanTemplate>>({});
     const [newSpecialtyName, setNewSpecialtyName] = useState('');
+    const [savingPlan, setSavingPlan] = useState(false);
 
     // --- Handlers ---
 
@@ -130,6 +132,55 @@ const Settings: React.FC<SettingsProps> = ({
             toast.error('Erro ao adicionar especialidade');
         }
     };
+
+    const handleOpenPlanModal = (plan?: PlanTemplate) => {
+        if (plan) {
+            setEditingPlan(plan);
+        } else {
+            setEditingPlan({ active: true, sessions: 10, price: 0 });
+        }
+        setIsPlanModalOpen(true);
+    };
+
+    const handleSavePlan = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSavingPlan(true);
+        try {
+            if (editingPlan.id) {
+                // Update
+                const updated = await planTemplatesApi.update(editingPlan.id, editingPlan);
+                setPlans(plans.map(p => p.id === updated.id ? updated : p));
+                toast.success('Plano atualizado');
+            } else {
+                // Create
+                if (!editingPlan.name || !editingPlan.sessions || editingPlan.price === undefined) {
+                    setSavingPlan(false);
+                    return;
+                }
+
+                // Ensure mandatory fields are present for TS
+                const payload = {
+                    name: editingPlan.name,
+                    specialtyId: editingPlan.specialtyId,
+                    sessions: editingPlan.sessions,
+                    price: editingPlan.price,
+                    description: editingPlan.description,
+                    active: editingPlan.active ?? true
+                };
+
+                const newPlan = await planTemplatesApi.create(payload);
+                setPlans([...plans, newPlan]);
+                toast.success('Plano criado');
+            }
+            setIsPlanModalOpen(false);
+        } catch (error) {
+            console.error(error);
+            toast.error('Erro ao salvar plano');
+        } finally {
+            setSavingPlan(false);
+        }
+    };
+
 
 
 
@@ -348,9 +399,43 @@ const Settings: React.FC<SettingsProps> = ({
                                     {selectedUser ? (
                                         <div className="animate-fade-in">
                                             <div className="flex justify-between items-start mb-6">
-                                                <div>
-                                                    <h3 className="font-bold text-gray-900">{selectedUser.name}</h3>
-                                                    <p className="text-sm text-gray-500">{selectedUser.email}</p>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="relative group/avatar cursor-pointer">
+                                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold shadow-sm overflow-hidden ${selectedUser.avatarUrl ? 'bg-white' : 'bg-gray-100 text-gray-500'}`}>
+                                                            {selectedUser.avatarUrl ? (
+                                                                <img src={selectedUser.avatarUrl} alt={selectedUser.name} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                selectedUser.name.charAt(0)
+                                                            )}
+                                                        </div>
+                                                        <div className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
+                                                            <UploadCloud className="w-6 h-6 text-white" />
+                                                        </div>
+                                                        <input
+                                                            type="file"
+                                                            accept="image/*"
+                                                            className="absolute inset-0 opacity-0 cursor-pointer"
+                                                            onChange={async (e) => {
+                                                                const file = e.target.files?.[0];
+                                                                if (!file) return;
+                                                                try {
+                                                                    const publicUrl = await storageApi.uploadFile('avatars', `user-${selectedUser.id}-${Date.now()}`, file);
+                                                                    await systemUsersApi.update(selectedUser.id, { avatarUrl: publicUrl });
+
+                                                                    // Update local state
+                                                                    setUsers(prev => prev.map(u => u.id === selectedUser.id ? { ...u, avatarUrl: publicUrl } : u));
+                                                                    toast.success('Avatar atualizado!');
+                                                                } catch (err) {
+                                                                    console.error(err);
+                                                                    toast.error('Erro ao enviar imagem');
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <h3 className="font-bold text-gray-900">{selectedUser.name}</h3>
+                                                        <p className="text-sm text-gray-500">{selectedUser.email}</p>
+                                                    </div>
                                                 </div>
                                                 <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs font-semibold uppercase text-gray-600">
                                                     {selectedUser.role}
@@ -603,10 +688,20 @@ const Settings: React.FC<SettingsProps> = ({
                                 </button>
                                 <button
                                     type="submit"
-                                    className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
+                                    disabled={savingPlan}
+                                    className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
-                                    <Save className="w-5 h-5" />
-                                    Salvar Plano
+                                    {savingPlan ? (
+                                        <>
+                                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                            Salvando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Save className="w-5 h-5" />
+                                            Salvar Plano
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </form>

@@ -2,8 +2,57 @@ import { supabase } from '../lib/supabase';
 import type {
     Unit, Professional, Patient, Session, Specialty,
     PlanTemplate, Announcement, SystemUser, SessionStatus,
-    DaySchedule, Holiday, PermissionKey
+    DaySchedule, Holiday, PermissionKey, Notification as SystemNotification
 } from '../types';
+
+// =====================================================
+// --- Notifications API ---
+export const notificationsApi = {
+    async getMy(userId: string): Promise<SystemNotification[]> {
+        const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(50);
+
+        if (error) throw error;
+        return data.map(n => ({
+            id: n.id,
+            userId: n.user_id,
+            title: n.title,
+            message: n.message,
+            read: n.read,
+            type: n.type,
+            createdAt: n.created_at
+        }));
+    },
+
+    async markAsRead(id: string) {
+        const { error } = await supabase
+            .from('notifications')
+            .update({ read: true })
+            .eq('id', id);
+
+        if (error) throw error;
+    },
+
+    async clearAll(userId: string) {
+        // Option 1: Delete all
+        // const { error } = await supabase.from('notifications').delete().eq('user_id', userId);
+
+        // Option 2: Mark all as read (safer)
+        const { error } = await supabase
+            .from('notifications')
+            .update({ read: true })
+            .eq('user_id', userId);
+
+        if (error) throw error;
+    }
+};
+
+// --- Storage API ---
+// =====================================================
 
 // =====================================================
 // UNITS API
@@ -159,7 +208,8 @@ export const professionalsApi = {
             specialty: prof.specialty,
             hourlyRate: prof.hourly_rate,
             unitIds: prof.professional_units?.map((pu: any) => pu.unit_id) || [],
-            color: prof.color
+            color: prof.color,
+            avatarUrl: prof.avatar_url
         }));
     },
 
@@ -171,7 +221,8 @@ export const professionalsApi = {
                 crf: professional.crf,
                 specialty: professional.specialty,
                 hourly_rate: professional.hourlyRate,
-                color: professional.color
+                color: professional.color,
+                avatar_url: professional.avatarUrl
             })
             .select()
             .single();
@@ -206,7 +257,8 @@ export const professionalsApi = {
                 crf: updates.crf,
                 specialty: updates.specialty,
                 hourly_rate: updates.hourlyRate,
-                color: updates.color
+                color: updates.color,
+                avatar_url: updates.avatarUrl
             })
             .eq('id', id);
 
@@ -416,7 +468,10 @@ export const sessionsApi = {
             type: session.type,
             status: session.status as SessionStatus,
             notes: session.notes,
-            signed: session.signed
+            signed: session.signed,
+            isOutsidePlan: session.is_outside_plan,
+            price: session.price,
+            signatureUrl: session.signature_url
         }));
     },
 
@@ -440,7 +495,10 @@ export const sessionsApi = {
             type: session.type,
             status: session.status as SessionStatus,
             notes: session.notes,
-            signed: session.signed
+            signed: session.signed,
+            isOutsidePlan: session.is_outside_plan,
+            price: session.price,
+            signatureUrl: session.signature_url
         }));
     },
 
@@ -457,7 +515,10 @@ export const sessionsApi = {
                 type: session.type,
                 status: session.status,
                 notes: session.notes || null,
-                signed: session.signed ?? false
+                signed: session.signed ?? false,
+                is_outside_plan: session.isOutsidePlan ?? false,
+                price: session.price || null,
+                signature_url: session.signatureUrl
             })
             .select()
             .single();
@@ -475,7 +536,9 @@ export const sessionsApi = {
             type: data.type,
             status: data.status,
             notes: data.notes || '',
-            signed: data.signed
+            signed: data.signed,
+            isOutsidePlan: data.is_outside_plan,
+            price: data.price
         };
     },
 
@@ -492,7 +555,10 @@ export const sessionsApi = {
                 type: updates.type,
                 status: updates.status,
                 notes: updates.notes,
-                signed: updates.signed
+                signed: updates.signed,
+                is_outside_plan: updates.isOutsidePlan,
+                price: updates.price,
+                signature_url: updates.signatureUrl
             })
             .eq('id', id)
             .select()
@@ -511,7 +577,10 @@ export const sessionsApi = {
             type: data.type,
             status: data.status,
             notes: data.notes,
-            signed: data.signed
+            signed: data.signed,
+            isOutsidePlan: data.is_outside_plan,
+            price: data.price,
+            signatureUrl: data.signature_url
         };
     },
 

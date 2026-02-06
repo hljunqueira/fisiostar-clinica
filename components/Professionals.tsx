@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Briefcase, Plus, MoreHorizontal, DollarSign, Calendar, Clock, Star, MapPin, ChevronRight, X, Save, Trash2, CheckCircle, AlertCircle, UserCog, FileText } from 'lucide-react';
+import { Search, Filter, Briefcase, Plus, MoreHorizontal, DollarSign, Calendar, Clock, Star, MapPin, ChevronRight, X, Save, Trash2, CheckCircle, AlertCircle, UserCog, FileText, UploadCloud } from 'lucide-react';
 import { UnitId, Professional, Session, SystemUser, Specialty } from '../types';
 import { professionalsApi, sessionsApi, unitsApi, systemUsersApi, specialtiesApi } from '../src/services/api';
+import { storageApi } from '../src/services/storage-api';
 import { paymentsApi } from '../src/services/financial-api';
 import toast from 'react-hot-toast';
 
@@ -28,7 +29,8 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
         specialty: '',
         hourlyRate: '',
         color: '#3B82F6',
-        unitIds: [] as string[]
+        unitIds: [] as string[],
+        avatarUrl: ''
     });
 
     useEffect(() => {
@@ -73,7 +75,8 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                 specialty: professional.specialty,
                 hourlyRate: professional.hourlyRate.toString(),
                 color: professional.color,
-                unitIds: professional.unitIds
+                unitIds: professional.unitIds,
+                avatarUrl: professional.avatarUrl || ''
             });
         } else {
             setSelectedProfessional(null);
@@ -83,7 +86,8 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                 specialty: '',
                 hourlyRate: '',
                 color: '#3B82F6',
-                unitIds: [currentUnit]
+                unitIds: [currentUnit],
+                avatarUrl: ''
             });
         }
         setIsModalOpen(true);
@@ -383,10 +387,14 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                                         <td className="px-6 py-4">
                                             <div className="flex items-center gap-3">
                                                 <div
-                                                    className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm"
+                                                    className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm overflow-hidden"
                                                     style={{ backgroundColor: prof.color }}
                                                 >
-                                                    {prof.name.charAt(0)}
+                                                    {prof.avatarUrl ? (
+                                                        <img src={prof.avatarUrl} alt={prof.name} className="w-full h-full object-cover" />
+                                                    ) : (
+                                                        prof.name.charAt(0)
+                                                    )}
                                                 </div>
                                                 <div>
                                                     <p className="font-medium text-gray-900">{prof.name}</p>
@@ -519,6 +527,38 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
 
                         <form onSubmit={handleSubmit} className="p-6 space-y-4">
                             {/* ... Professional Form fields ... */}
+                            <div className="flex justify-center mb-6">
+                                <div className="relative group/avatar cursor-pointer">
+                                    <div className={`w-24 h-24 rounded-full flex items-center justify-center text-3xl font-bold shadow-sm overflow-hidden border-4 border-white ${formData.avatarUrl ? 'bg-white' : 'bg-gray-100 text-gray-500'}`} style={{ borderColor: formData.color }}>
+                                        {formData.avatarUrl ? (
+                                            <img src={formData.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                                        ) : (
+                                            (formData.name || '?').charAt(0)
+                                        )}
+                                    </div>
+                                    <div className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center">
+                                        <UploadCloud className="w-8 h-8 text-white" />
+                                    </div>
+                                    <input
+                                        type="file"
+                                        accept="image/*"
+                                        className="absolute inset-0 opacity-0 cursor-pointer"
+                                        onChange={async (e) => {
+                                            const file = e.target.files?.[0];
+                                            if (!file) return;
+                                            try {
+                                                const publicUrl = await storageApi.uploadFile('avatars', `prof-${Date.now()}`, file);
+                                                setFormData({ ...formData, avatarUrl: publicUrl });
+                                                toast.success('Imagem carregada!');
+                                            } catch (err) {
+                                                console.error(err);
+                                                toast.error('Erro ao enviar imagem');
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+
                             <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nome Completo</label>
                                 <input

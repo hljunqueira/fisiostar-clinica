@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
+import { FinancialDashboard } from './FinancialDashboard';
 import { DollarSign, Calendar, CheckCircle2, Clock, Download, Filter, Plus, TrendingUp, TrendingDown, X, Save, Trash2 } from 'lucide-react';
 import { UnitId, Professional, Patient } from '../types';
 import type { Payment, Expense, Revenue, CreateExpense, CreateRevenue } from '../src/types/financial';
@@ -185,10 +186,13 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
                 <StatCard
                     title="Balanço"
                     value={`R$ ${netBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
-                    icon={<DollarSign className="h-5 w-5 text-blue-600" />}
+                    icon={<DollarSign className={`h-5 w-5 ${netBalance >= 0 ? "text-blue-600" : "text-red-600"}`} />}
                     color={netBalance >= 0 ? "blue" : "red"}
                 />
             </div>
+
+            {/* Charts Dashboard */}
+            <FinancialDashboard revenues={revenues} expenses={expenses} />
 
             {/* Tabs */}
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
@@ -384,15 +388,15 @@ const RevenuesTable = ({ revenues, patients, onDelete }: { revenues: Revenue[], 
 
     return (
         <div className="overflow-x-auto">
-            <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
+            <table className="w-full relative">
+                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                     <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Data</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Descrição</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Categoria</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Paciente</th>
-                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Valor</th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Data</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Descrição</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Categoria</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Paciente</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase bg-gray-50">Valor</th>
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase bg-gray-50">Ações</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -441,15 +445,15 @@ const ExpensesTable = ({ expenses, onEdit, onDelete }: { expenses: Expense[], on
 
     return (
         <div className="overflow-x-auto">
-            <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
+            <table className="w-full relative">
+                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                     <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Data</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Descrição</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Categoria</th>
-                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Valor</th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Ações</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Data</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Descrição</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Categoria</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase bg-gray-50">Valor</th>
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase bg-gray-50">Status</th>
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase bg-gray-50">Ações</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -489,15 +493,15 @@ const PaymentsTable = ({ payments, professionals, onMarkAsPaid }: { payments: Pa
 
     return (
         <div className="overflow-x-auto">
-            <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
+            <table className="w-full relative">
+                <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                     <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Profissional</th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Período</th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Sessões</th>
-                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase">Total</th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Status</th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase">Ação</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Profissional</th>
+                        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase bg-gray-50">Período</th>
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase bg-gray-50">Sessões</th>
+                        <th className="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase bg-gray-50">Total</th>
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase bg-gray-50">Status</th>
+                        <th className="px-6 py-3 text-center text-xs font-semibold text-gray-700 uppercase bg-gray-50">Ação</th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
