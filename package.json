@@ -5,15 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:all": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.91.0",
+    "lucide-react": "0.344.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "lucide-react": "0.344.0",
-    "recharts": "2.12.0",
-    "react-router-dom": "6.22.3"
+    "react-hot-toast": "^2.6.0",
+    "react-router-dom": "6.22.3",
+    "recharts": "2.12.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

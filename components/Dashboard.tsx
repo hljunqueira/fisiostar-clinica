@@ -1,75 +1,168 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Users, 
-  Calendar, 
-  DollarSign, 
-  Activity, 
+import {
+  Users,
+  Calendar,
+  DollarSign,
+  Activity,
   ArrowUpRight,
   Megaphone,
   Plus,
-  Trash2
+  Trash2,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { UnitId, Announcement } from '../types';
-import { SESSIONS, PROFESSIONALS } from '../constants';
+import { UnitId, Announcement, Patient, Session, Revenue } from '../types';
+import { patientsApi, sessionsApi } from '../src/services/api';
+import { revenuesApi } from '../src/services/financial-api';
+import { ConfirmModal } from './ConfirmModal';
 
 interface DashboardProps {
   currentUnit: UnitId;
   announcements: Announcement[];
   onAddAnnouncement: (a: Announcement) => void;
   onDeleteAnnouncement: (id: string) => void;
+  canManageAnnouncements?: boolean;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ 
-    currentUnit, 
-    announcements, 
-    onAddAnnouncement, 
-    onDeleteAnnouncement 
+const Dashboard: React.FC<DashboardProps> = ({
+  currentUnit,
+  announcements,
+  onAddAnnouncement,
+  onDeleteAnnouncement,
+  canManageAnnouncements = false
 }) => {
   const navigate = useNavigate();
-  
-  // Mock logic to filter data by unit
-  const filteredSessions = SESSIONS.filter(s => s.unitId === currentUnit);
-  const todaySessions = filteredSessions.length;
-  const monthlyRevenue = filteredSessions.length * 85; // Simple mock calculation
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [revenues, setRevenues] = useState<Revenue[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const data = [
-    { name: 'Seg', sessions: 12 },
-    { name: 'Ter', sessions: 19 },
-    { name: 'Qua', sessions: 15 },
-    { name: 'Qui', sessions: 22 },
-    { name: 'Sex', sessions: 18 },
-    { name: 'Sáb', sessions: 8 },
-  ];
+  // Load data from Supabase
+  useEffect(() => {
+    async function loadData() {
+      try {
+        setLoading(true);
+        const [patientsData, sessionsData, revenuesData] = await Promise.all([
+          patientsApi.getAll(),
+          sessionsApi.getAll(),
+          revenuesApi.getAll({ unitId: currentUnit }) // Fetch revenues for current unit
+        ]);
+        setPatients(patientsData);
+        setSessions(sessionsData);
+        setRevenues(revenuesData);
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
 
-  const handleNewSession = () => {
-      navigate('/agenda?action=new');
+  // Calculate metrics
+  const filteredSessions = sessions.filter(s => s.unitId === currentUnit);
+  const todaySessions = filteredSessions.filter(s => s.date === new Date().toISOString().split('T')[0]).length;
+
+  const activePatients = patients.filter(p => p.status === 'Active').length;
+
+  // Calculate monthly revenue from completed sessions
+  const thisMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+  const monthlyCompletedSessions = filteredSessions.filter(s =>
+    s.date.startsWith(thisMonth) && s.status === 'Realizada'
+  ).length;
+
+  // Calculate revenue from REAL revenues table
+  const monthlyRevenue = revenues
+    .filter(r => r.revenueDate.startsWith(thisMonth))
+    .reduce((sum, r) => sum + r.amount, 0);
+
+  // Calculate no-show rate
+  const totalSessions = filteredSessions.length;
+  const noShows = filteredSessions.filter(s => s.status === 'Falta').length;
+  const noShowRate = totalSessions > 0 ? ((noShows / totalSessions) * 100).toFixed(1) : '0.0';
+
+  // Generate week data for chart
+  const getLastWeekDates = () => {
+    const dates = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date();
+      date.setDate(date.getDate() - i);
+      dates.push(date);
+    }
+    return dates;
   };
 
-  const handleAddClick = () => {
-      const title = prompt("Título do Aviso:");
-      if (!title) return;
-      const message = prompt("Mensagem:");
-      if (!message) return;
+  const weekData = getLastWeekDates().map(date => {
+    const dateStr = date.toISOString().split('T')[0];
+    const dayName = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][date.getDay()];
+    const count = sessions.filter(s =>
+      s.unitId === currentUnit &&
+      s.date === dateStr &&
+      s.status === 'Realizada'
+    ).length;
 
-      const newAnnouncement: Announcement = {
-          id: `a_${Date.now()}`,
-          title,
-          message,
-          type: 'info',
-          date: new Date().toISOString().split('T')[0],
-          targetRole: 'all'
-      };
-      onAddAnnouncement(newAnnouncement);
+    return { name: dayName, sessions: count };
+  });
+
+  // Get patients with remaining sessions, sorted by expiration
+  const patientsWithPlans = patients
+    .filter(p => p.plan && p.plan.remainingSessions !== undefined)
+    .sort((a, b) => {
+      const dateA = new Date(a.plan!.expiresAt).getTime();
+      const dateB = new Date(b.plan!.expiresAt).getTime();
+      return dateA - dateB;
+    })
+    .slice(0, 7); // Show top 7
+
+  const handleNewSession = () => {
+    navigate('/agenda?action=new');
+  };
+
+
+
+
+  // Modal State
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [announcementToDelete, setAnnouncementToDelete] = useState<string | null>(null);
+
+  const handleAddClick = () => {
+    const title = prompt('Título do aviso:');
+    if (!title) return;
+    const message = prompt('Mensagem:');
+    if (!message) return;
+    const role = prompt('Para quem? (all/admin/secretary/professional)', 'all');
+
+    onAddAnnouncement({
+      id: crypto.randomUUID(),
+      title,
+      message,
+      targetRole: (role as any) || 'all',
+      createdAt: new Date().toISOString()
+    });
   };
 
   const handleDeleteClick = (id: string) => {
-      if(confirm('Tem certeza que deseja remover este aviso?')) {
-          onDeleteAnnouncement(id);
-      }
+    setAnnouncementToDelete(id);
+    setShowConfirmModal(true);
   };
+
+  const confirmDelete = () => {
+    if (announcementToDelete) {
+      onDeleteAnnouncement(announcementToDelete);
+      setAnnouncementToDelete(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Carregando dashboard...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -81,34 +174,34 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard 
-          title="Sessões Hoje" 
-          value={todaySessions.toString()} 
-          icon={<Calendar className="h-5 w-5 text-blue-600" />} 
-          trend="+12% vs ontem"
+        <KpiCard
+          title="Sessões Hoje"
+          value={todaySessions.toString()}
+          icon={<Calendar className="h-5 w-5 text-blue-600" />}
+          trend={`${filteredSessions.length} total esta semana`}
           color="blue"
         />
-        <KpiCard 
-          title="Faturamento (Mês)" 
-          value={`R$ ${monthlyRevenue.toLocaleString('pt-BR')}`} 
-          icon={<DollarSign className="h-5 w-5 text-emerald-600" />} 
-          trend="Dentro da meta"
+        <KpiCard
+          title="Faturamento (Mês)"
+          value={`R$ ${monthlyRevenue.toLocaleString('pt-BR')}`}
+          icon={<DollarSign className="h-5 w-5 text-emerald-600" />}
+          trend={`${monthlyCompletedSessions} sessões realizadas`}
           color="green"
         />
-        <KpiCard 
-          title="Pacientes Ativos" 
-          value="142" 
-          icon={<Users className="h-5 w-5 text-purple-600" />} 
-          trend="+3 novos esta semana"
+        <KpiCard
+          title="Pacientes Ativos"
+          value={activePatients.toString()}
+          icon={<Users className="h-5 w-5 text-purple-600" />}
+          trend={`${patients.length} total cadastrados`}
           color="purple"
         />
-        <KpiCard 
-          title="Taxa de Faltas" 
-          value="4.2%" 
-          icon={<Activity className="h-5 w-5 text-orange-600" />} 
-          trend="Atenção necessária"
+        <KpiCard
+          title="Taxa de Faltas"
+          value={`${noShowRate}%`}
+          icon={<Activity className="h-5 w-5 text-orange-600" />}
+          trend={parseFloat(noShowRate) > 5 ? "Atenção necessária" : "Dentro do esperado"}
           color="orange"
-          alert
+          alert={parseFloat(noShowRate) > 5}
         />
       </div>
 
@@ -121,15 +214,15 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data}>
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#6B7280', fontSize: 12}} />
-                <Tooltip 
-                  cursor={{fill: '#F3F4F6'}}
+              <BarChart data={weekData}>
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#6B7280', fontSize: 12 }} />
+                <Tooltip
+                  cursor={{ fill: '#F3F4F6' }}
                   contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
                 <Bar dataKey="sessions" radius={[4, 4, 0, 0]} barSize={32}>
-                  {data.map((entry, index) => (
+                  {weekData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill="#2563EB" />
                   ))}
                 </Bar>
@@ -138,84 +231,121 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* Right Column: Actions & Announcements */}
+        {/* Right Column: Actions & Info */}
         <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
-                <h3 className="font-semibold text-gray-900 mb-4">Ações Rápidas</h3>
-                <div className="space-y-3 mb-6">
-                    <button 
-                        onClick={handleNewSession}
-                        className="w-full flex items-center justify-between p-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors font-medium"
-                    >
-                    <span>Nova Sessão</span>
-                    <ArrowUpRight className="h-4 w-4" />
-                    </button>
-                    <button 
-                        onClick={() => navigate('/pacientes')}
-                        className="w-full flex items-center justify-between p-3 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
-                    >
-                    <span>Cadastrar Paciente</span>
-                    <Users className="h-4 w-4" />
-                    </button>
-                </div>
-
-                <h3 className="font-semibold text-gray-900 mb-3 border-t pt-4 border-gray-100">Próximos Horários</h3>
-                <div className="flex-1 overflow-y-auto space-y-3">
-                    {filteredSessions.slice(0, 3).map(session => {
-                    const prof = PROFESSIONALS.find(p => p.id === session.professionalId);
-                    return (
-                        <div key={session.id} className="flex items-start gap-3 text-sm">
-                        <div className="w-2 h-2 mt-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-                        <div>
-                            <p className="font-medium text-gray-900">{session.time} - {session.type}</p>
-                            <p className="text-gray-500">{prof?.name.split(' ')[0]}</p>
-                        </div>
-                        </div>
-                    )
-                    })}
-                    {filteredSessions.length === 0 && (
-                        <p className="text-sm text-gray-400 italic">Nenhum horário próximo.</p>
-                    )}
-                </div>
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col">
+            <h3 className="font-semibold text-gray-900 mb-4">Ações Rápidas</h3>
+            <div className="space-y-3 mb-6">
+              <button
+                onClick={handleNewSession}
+                className="w-full flex items-center justify-between p-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors font-medium"
+              >
+                <span>Nova Sessão</span>
+                <ArrowUpRight className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => navigate('/pacientes')}
+                className="w-full flex items-center justify-between p-3 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+              >
+                <span>Cadastrar Paciente</span>
+                <Users className="h-4 w-4" />
+              </button>
             </div>
 
-            {/* Admin Announcements Card - Styled exactly as requested */}
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col h-fit">
-                 <div className="flex justify-between items-center mb-6">
-                    <h3 className="font-bold text-gray-900 flex items-center gap-2">
-                        <Megaphone className="w-5 h-5 text-orange-500" />
-                        Gestão de Avisos
-                    </h3>
-                    <button onClick={handleAddClick} className="text-blue-600 hover:text-blue-800 transition-colors" title="Adicionar novo aviso">
-                        <Plus className="w-5 h-5" />
-                    </button>
-                 </div>
-                 
-                 <div className="space-y-3">
-                    {announcements.map(ann => (
-                        <div key={ann.id} className="p-4 bg-gray-50 rounded-lg border border-gray-100 relative group">
-                            <p className="font-bold text-sm text-gray-900 mb-1">{ann.title}</p>
-                            <p className="text-xs text-gray-500 leading-relaxed">{ann.message}</p>
-                            
-                            {/* Delete button appearing on hover */}
-                            <button 
-                                onClick={() => handleDeleteClick(ann.id)}
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all p-1"
-                                title="Remover aviso"
-                            >
-                                <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
-                    ))}
-                    {announcements.length === 0 && (
-                        <div className="text-center py-4 text-sm text-gray-400 italic">
-                            Nenhum aviso cadastrado.
-                        </div>
-                    )}
-                 </div>
+            <h3 className="font-semibold text-gray-900 mb-3 border-t pt-4 border-gray-100 flex items-center gap-2">
+              <Clock className="h-4 w-4 text-blue-600" />
+              Aulas Restantes
+            </h3>
+            <div className="flex-1 overflow-y-auto space-y-3 max-h-64">
+              {patientsWithPlans.map(patient => {
+                const isExpired = new Date(patient.plan!.expiresAt) < new Date();
+                const expiresSoon = new Date(patient.plan!.expiresAt) < new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+                const expDateFormatted = new Date(patient.plan!.expiresAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+                return (
+                  <div key={patient.id} className={`p-3 rounded-lg border ${isExpired ? 'bg-red-50 border-red-200' :
+                    expiresSoon ? 'bg-yellow-50 border-yellow-200' :
+                      'bg-gray-50 border-gray-200'
+                    }`}>
+                    <p className="font-medium text-sm text-gray-900">{patient.name}</p>
+                    <p className="text-xs text-gray-600">{patient.plan!.name}</p>
+                    <div className="flex items-center gap-2 mt-1 text-xs">
+                      <span className="font-semibold">
+                        {patient.plan!.remainingSessions} restantes
+                      </span>
+                      <span className="text-gray-400">•</span>
+                      {isExpired ? (
+                        <span className="text-red-600 font-medium flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" />
+                          Expirado
+                        </span>
+                      ) : (
+                        <span className={expiresSoon ? 'text-yellow-700' : 'text-gray-500'}>
+                          Exp: {expDateFormatted}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {patientsWithPlans.length === 0 && (
+                <p className="text-sm text-gray-400 italic text-center py-4">Nenhum plano ativo.</p>
+              )}
             </div>
+          </div>
+
+          {/* Admin Announcements Card */}
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col h-fit">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="font-bold text-gray-900 flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-orange-500" />
+                Gestão de Avisos
+
+              </h3>
+              {canManageAnnouncements && (
+                <button onClick={handleAddClick} className="text-blue-600 hover:text-blue-800 transition-colors" title="Adicionar novo aviso">
+                  <Plus className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              {announcements.map(ann => (
+                <div key={ann.id} className="p-4 bg-gray-50 rounded-lg border border-gray-100 relative group">
+                  <p className="font-bold text-sm text-gray-900 mb-1">{ann.title}</p>
+                  <p className="text-xs text-gray-500 leading-relaxed">{ann.message}</p>
+
+                  {canManageAnnouncements && (
+                    <button
+                      onClick={() => handleDeleteClick(ann.id)}
+                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-all p-1"
+                      title="Remover aviso"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {announcements.length === 0 && (
+                <div className="text-center py-4 text-sm text-gray-400 italic">
+                  Nenhum aviso cadastrado.
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
+
+      {/* Confirm Modal */}
+      <ConfirmModal
+        isOpen={showConfirmModal}
+        onClose={() => setShowConfirmModal(false)}
+        onConfirm={confirmDelete}
+        title="Remover Aviso"
+        description="Tem certeza que deseja remover este aviso? Esta ação não pode ser desfeita."
+        confirmLabel="Remover"
+        variant="danger"
+      />
     </div>
   );
 };

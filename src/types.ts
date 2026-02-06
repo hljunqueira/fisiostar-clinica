@@ -1,7 +1,4 @@
 
-// Re-export types from sub-modules
-export * from './src/types/financial';
-
 export type UnitId = string;
 export type ProfessionalId = string;
 export type PatientId = string;

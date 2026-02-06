@@ -1,222 +1,110 @@
 
-import React, { useState, useRef } from 'react';
-import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar as CalendarIcon, Hash } from 'lucide-react';
-import { PATIENTS, SESSIONS, PROFESSIONALS, UNITS, PLAN_TEMPLATES } from '../constants';
-import { UnitId, Patient, SessionStatus, PlanTemplate } from '../types';
+import React, { useState, useRef, useEffect } from 'react';
+import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar as CalendarIcon, Hash, Edit2, Trash2, XCircle } from 'lucide-react';
 
-interface PatientsProps {
-    currentUnit: UnitId;
-}
 
-const Patients: React.FC<PatientsProps> = ({ currentUnit }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  // Use state for patients to allow addition
-  const [patientsList, setPatientsList] = useState<Patient[]>(PATIENTS);
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+import { UnitId, Patient, SessionStatus, PlanTemplate, Professional, Session, Unit } from '../types';
+import { patientsApi, planTemplatesApi, professionalsApi, sessionsApi, unitsApi } from '../src/services/api';
+import toast from 'react-hot-toast';
+import SignatureModal from './SignatureModal';
 
-  const filteredPatients = patientsList.filter(p => 
-    p.unitId === currentUnit && 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+// ... (omitted)
 
-  const handleCreatePatient = (newPatient: Patient) => {
-      setPatientsList([newPatient, ...patientsList]);
-      setIsCreateModalOpen(false);
-  };
-
-  return (
-    <div className="space-y-6 animate-fade-in">
-       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Pacientes</h1>
-          <p className="text-gray-500">Gerencie prontuários, planos e assinaturas.</p>
-        </div>
-        <button 
-            onClick={() => setIsCreateModalOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm"
-        >
-          <UserPlus className="w-4 h-4" />
-          Novo Paciente
-        </button>
-      </div>
-
-      {/* Filters and Search */}
-      <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input 
-                type="text" 
-                placeholder="Buscar por nome, CPF ou telefone..."
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-            />
-        </div>
-        <button className="flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors text-sm font-medium">
-            <Filter className="w-4 h-4" />
-            Filtros
-        </button>
-      </div>
-
-      {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-         <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-                <thead className="text-xs text-gray-500 uppercase bg-gray-50 border-b border-gray-100">
-                    <tr>
-                        <th className="px-6 py-4 font-medium">Paciente</th>
-                        <th className="px-6 py-4 font-medium">Plano Atual</th>
-                        <th className="px-6 py-4 font-medium">Saldo Sessões</th>
-                        <th className="px-6 py-4 font-medium">Vencimento</th>
-                        <th className="px-6 py-4 font-medium">Status</th>
-                        <th className="px-6 py-4 font-medium text-right">Ações</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                    {filteredPatients.length > 0 ? filteredPatients.map(patient => (
-                        <tr 
-                            key={patient.id} 
-                            onClick={() => setSelectedPatient(patient)}
-                            className="hover:bg-gray-50/50 transition-colors group cursor-pointer"
-                        >
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                    {patient.photoUrl ? (
-                                        <img src={patient.photoUrl} alt={patient.name} className="w-10 h-10 rounded-full object-cover border border-gray-200" />
-                                    ) : (
-                                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                                            {patient.name.charAt(0)}
-                                        </div>
-                                    )}
-                                    <div className="flex flex-col">
-                                        <span className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">{patient.name}</span>
-                                        <span className="text-xs text-gray-400">{patient.phone}</span>
-                                    </div>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 text-gray-600">
-                                {patient.plan.name}
-                            </td>
-                            <td className="px-6 py-4">
-                                <div className="flex items-center gap-2">
-                                    <div className="w-full bg-gray-200 rounded-full h-2 w-20">
-                                        <div 
-                                            className="bg-blue-600 h-2 rounded-full" 
-                                            style={{ width: `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` }}
-                                        />
-                                    </div>
-                                    <span className="text-xs font-medium text-gray-600">{patient.plan.remainingSessions}/{patient.plan.totalSessions}</span>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 text-gray-600">
-                                {new Date(patient.plan.expiresAt).toLocaleDateString('pt-BR')}
-                            </td>
-                            <td className="px-6 py-4">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${patient.status === 'Active' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
-                                    {patient.status === 'Active' ? 'Ativo' : 'Inativo'}
-                                </span>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                                <button className="text-gray-400 hover:text-blue-600 transition-colors p-1">
-                                    <MoreHorizontal className="w-5 h-5" />
-                                </button>
-                            </td>
-                        </tr>
-                    )) : (
-                        <tr>
-                            <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                                Nenhum paciente encontrado.
-                            </td>
-                        </tr>
-                    )}
-                </tbody>
-            </table>
-         </div>
-      </div>
-
-      {/* Patient Details Modal */}
-      {selectedPatient && (
-          <PatientDetailModal 
-            patient={selectedPatient} 
-            onClose={() => setSelectedPatient(null)} 
-            currentUnit={currentUnit}
-          />
-      )}
-
-      {/* Create Patient Modal */}
-      {isCreateModalOpen && (
-          <CreatePatientModal 
-            onClose={() => setIsCreateModalOpen(false)}
-            onSave={handleCreatePatient}
-            currentUnit={currentUnit}
-          />
-      )}
-    </div>
-  );
-};
-
-// --- Sub-component: Create Patient Modal ---
-
-const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => void, onSave: (p: Patient) => void, currentUnit: UnitId }) => {
+// CreatePatientModal
+const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initialData }: { onClose: () => void, onSave: (p: Patient) => void, currentUnit: UnitId, planTemplates: PlanTemplate[], initialData?: Patient | null }) => {
     // Basic Info
-    const [name, setName] = useState('');
-    const [cpf, setCpf] = useState('');
-    const [birthDate, setBirthDate] = useState('');
-    
+    const [name, setName] = useState(initialData?.name || '');
+    const [cpf, setCpf] = useState(initialData?.cpf || '');
+    const [birthDate, setBirthDate] = useState(initialData?.birthDate || '');
+    const [unitName, setUnitName] = useState('');
+
+    useEffect(() => {
+        unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('Unidade Desconhecida'));
+    }, [currentUnit]);
+
     // Contact & Address
-    const [phone, setPhone] = useState('');
-    const [city, setCity] = useState('');
-    const [address, setAddress] = useState('');
-    
-    // Treatment
-    const [selectedPlanId, setSelectedPlanId] = useState('');
-    
-    const activePlans = PLAN_TEMPLATES.filter(p => p.active);
-    const unitName = UNITS.find(u => u.id === currentUnit)?.name;
+    const [phone, setPhone] = useState(initialData?.phone || '');
+    const [city, setCity] = useState(initialData?.city || '');
+    const [address, setAddress] = useState(initialData?.address || '');
+
+    // Treatment - find matching plan template by name if editing, roughly
+    // This is imperfect if plan names change, but good enough for now.
+    // Ideally we'd store planTemplateId on the patient plan.
+    const [selectedPlanId, setSelectedPlanId] = useState(() => {
+        if (initialData?.plan) {
+            const match = planTemplates.find(p => p.name === initialData.plan.name);
+            return match?.id || '';
+        }
+        return '';
+    });
+
+    const activePlans = planTemplates.filter(p => p.active);
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        const planTemplate = PLAN_TEMPLATES.find(p => p.id === selectedPlanId);
-        
+        const planTemplate = planTemplates.find(p => p.id === selectedPlanId);
+
         if (!name || !planTemplate) return;
 
-        // Calculate expiration (e.g., 30 days from now)
-        const expiresAt = new Date();
-        expiresAt.setDate(expiresAt.getDate() + 30);
+        // Provide fallback if keeping existing plan logic is preferred, but for now we overwrite/update plan if selected.
+        // If editing, we might want to keep existing expiration if plan didn't change, but simpler to just set new plan details if user selected one.
 
-        const newPatient: Patient = {
-            id: `p-${Date.now()}`,
+        let planData = initialData?.plan;
+
+        // If user changed the plan dropdown or it's new
+        if (planTemplate) {
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 30);
+
+            // If editing and plan name matches, maybe keep existing credits? 
+            // For simplicity, let's assume selecting a plan resets/updates terms. 
+            // Or better: validade if we really want to reset. 
+            // Let's assume for this "Edit" action we are updating basic info mainly.
+            // If plan is changed, we update plan.
+
+            planData = {
+                name: planTemplate.name,
+                totalSessions: planTemplate.sessions,
+                remainingSessions: planTemplate.sessions,
+                expiresAt: expiresAt.toISOString()
+            };
+
+            // If we are editing and the plan selected is the SAME as before, execute a merge or keep old?
+            // User request is general "Edit", often for typo in name or address.
+            // Responsive logic: If initialData exists and selectedPlan matches, keep existing plan status (credits/dates)
+            if (initialData?.plan && initialData.plan.name === planTemplate.name) {
+                planData = initialData.plan;
+            }
+        }
+
+        const patientData: Patient = {
+            id: initialData?.id || `p-${Date.now()}`,
             name,
             phone: phone || '(00) 00000-0000',
             cpf,
             birthDate,
             address,
             city,
-            unitId: currentUnit,
-            status: 'Active',
-            plan: {
-                name: planTemplate.name,
-                totalSessions: planTemplate.sessions,
-                remainingSessions: planTemplate.sessions,
-                expiresAt: expiresAt.toISOString()
-            },
-            lastVisit: undefined
+            unitId: currentUnit, // Keep unit or update? Usually stays.
+            status: initialData?.status || 'Active',
+            plan: planData!,
+            lastVisit: initialData?.lastVisit,
+            photoUrl: initialData?.photoUrl
         };
 
-        onSave(newPatient);
+        onSave(patientData);
     };
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
-            
+
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl relative z-10 animate-fade-in flex flex-col max-h-[90vh] overflow-hidden">
                 <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gray-50/50">
                     <div>
                         <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
                             <UserPlus className="w-6 h-6 text-blue-600" />
-                            Novo Prontuário
+                            {initialData ? 'Editar Paciente' : 'Novo Prontuário'}
                         </h2>
                         <p className="text-sm text-gray-500 mt-1">Unidade: <span className="font-semibold">{unitName}</span></p>
                     </div>
@@ -227,7 +115,7 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
 
                 <form onSubmit={handleSubmit} className="overflow-y-auto">
                     <div className="p-6 space-y-8">
-                        
+
                         {/* Section 1: Dados Pessoais */}
                         <div>
                             <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
@@ -237,8 +125,8 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="md:col-span-2">
                                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nome Completo</label>
-                                    <input 
-                                        type="text" 
+                                    <input
+                                        type="text"
                                         required
                                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
                                         placeholder="Ex: João da Silva"
@@ -250,8 +138,8 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">CPF</label>
                                     <div className="relative">
                                         <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input 
-                                            type="text" 
+                                        <input
+                                            type="text"
                                             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400"
                                             placeholder="000.000.000-00"
                                             value={cpf}
@@ -263,8 +151,8 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Data de Nascimento</label>
                                     <div className="relative">
                                         <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input 
-                                            type="date" 
+                                        <input
+                                            type="date"
                                             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
                                             value={birthDate}
                                             onChange={e => setBirthDate(e.target.value)}
@@ -285,8 +173,8 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Telefone</label>
                                     <div className="relative">
                                         <PhoneIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                        <input 
-                                            type="text" 
+                                        <input
+                                            type="text"
                                             required
                                             className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
                                             placeholder="(00) 90000-0000"
@@ -297,8 +185,8 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                                 </div>
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cidade</label>
-                                    <input 
-                                        type="text" 
+                                    <input
+                                        type="text"
                                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
                                         placeholder="Ex: Araranguá"
                                         value={city}
@@ -307,8 +195,8 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                                 </div>
                                 <div className="md:col-span-2">
                                     <label className="block text-sm font-semibold text-gray-700 mb-1.5">Endereço Completo</label>
-                                    <input 
-                                        type="text" 
+                                    <input
+                                        type="text"
                                         className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
                                         placeholder="Rua, Número, Bairro"
                                         value={address}
@@ -325,7 +213,7 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                                 Plano de Tratamento
                             </h3>
                             <div className="relative">
-                                <select 
+                                <select
                                     required
                                     className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 appearance-none shadow-sm"
                                     value={selectedPlanId}
@@ -346,14 +234,14 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
                     </div>
 
                     <div className="p-6 pt-0 flex justify-end gap-3 bg-white sticky bottom-0">
-                        <button 
-                            type="button" 
+                        <button
+                            type="button"
                             onClick={onClose}
                             className="px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
                         >
                             Cancelar
                         </button>
-                        <button 
+                        <button
                             type="submit"
                             className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
                         >
@@ -369,16 +257,34 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit }: { onClose: () => v
 
 // --- Sub-component: Patient Detail Modal ---
 
-const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patient, onClose: () => void, currentUnit: UnitId }) => {
+const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { patient: Patient, onClose: () => void, currentUnit: UnitId, professionals: Professional[] }) => {
+    const [unitName, setUnitName] = useState('');
+    useEffect(() => {
+        unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('FisioStar'));
+    }, [currentUnit]);
+
     const [activeTab, setActiveTab] = useState<'info' | 'signatures'>('signatures');
     const [currentPhoto, setCurrentPhoto] = useState(patient.photoUrl);
     const [showCamera, setShowCamera] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
-    
-    // Mock patient history state just for this modal instance
-    const [patientHistory, setPatientHistory] = useState(
-        SESSIONS.filter(s => s.patientId === patient.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    );
+
+    const [patientHistory, setPatientHistory] = useState<Session[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(true);
+
+    useEffect(() => {
+        async function loadHistory() {
+            try {
+                setLoadingHistory(true);
+                const sessions = await sessionsApi.getAll({ patientId: patient.id });
+                setPatientHistory(sessions.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+            } catch (error) {
+                console.error("Error loading patient history", error);
+            } finally {
+                setLoadingHistory(false);
+            }
+        }
+        loadHistory();
+    }, [patient.id]);
 
     const handleStartCamera = async () => {
         setShowCamera(true);
@@ -389,7 +295,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
             }
         } catch (err) {
             console.error(err);
-            alert("Erro ao acessar câmera. Verifique se você deu permissão.");
+            toast.error('Erro ao acessar câmera. Verifique se você deu permissão.');
             setShowCamera(false);
         }
     };
@@ -417,19 +323,45 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
         }
     };
 
-    const handleConfirmSignature = (sessionId: string) => {
-        // Update local state to show as signed
-        setPatientHistory(prev => prev.map(s => 
-            s.id === sessionId ? { ...s, signed: true } : s
-        ));
+    // Signature modal state
+    const [showSignatureModal, setShowSignatureModal] = useState(false);
+    const [sessionToSign, setSessionToSign] = useState<string | null>(null);
+    const [showPaymentSignatureModal, setShowPaymentSignatureModal] = useState(false);
+
+    const handleOpenSignatureModal = (sessionId: string) => {
+        setSessionToSign(sessionId);
+        setShowSignatureModal(true);
+    };
+
+    const handleConfirmSignature = async (imageData: string, type: 'signature' | 'photo') => {
+        if (!sessionToSign) return;
+        try {
+            // In the future, imageData could be saved to a signature_image column
+            await sessionsApi.update(sessionToSign, { signed: true });
+            setPatientHistory(prev => prev.map(s =>
+                s.id === sessionToSign ? { ...s, signed: true } : s
+            ));
+            toast.success(`Assinatura confirmada via ${type === 'signature' ? 'desenho' : 'foto'}!`);
+            setShowSignatureModal(false);
+            setSessionToSign(null);
+        } catch (error) {
+            console.error('Error confirming signature:', error);
+            toast.error('Erro ao confirmar assinatura');
+        }
+    };
+
+    const handleConfirmPayment = async (imageData: string, type: 'signature' | 'photo') => {
+        // In the future, this would save to patient_plans payment fields
+        toast.success(`Pagamento confirmado via ${type === 'signature' ? 'assinatura' : 'foto'}!`);
+        setShowPaymentSignatureModal(false);
     };
 
     const handlePrint = () => {
-        const unitName = UNITS.find(u => u.id === currentUnit)?.name || 'FisioStar';
+        // const unitName = UNITS.find(u => u.id === currentUnit)?.name || 'FisioStar'; // Removed
         const printWindow = window.open('', '', 'width=900,height=700');
 
         if (!printWindow) {
-            alert("O bloqueador de pop-ups impediu a impressão. Por favor, permita pop-ups para este site.");
+            toast.error('O bloqueador de pop-ups impediu a impressão. Por favor, permita pop-ups para este site.');
             return;
         }
 
@@ -511,8 +443,8 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                     </thead>
                     <tbody>
                         ${patientHistory.map(session => {
-                            const prof = PROFESSIONALS.find(p => p.id === session.professionalId);
-                            return `
+            const prof = professionals.find(p => p.id === session.professionalId);
+            return `
                                 <tr>
                                     <td>${new Date(session.date).toLocaleDateString('pt-BR')}</td>
                                     <td>${session.time}</td>
@@ -521,7 +453,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                     <td><div class="signature-box"></div></td>
                                 </tr>
                             `;
-                        }).join('')}
+        }).join('')}
                     </tbody>
                 </table>
 
@@ -544,7 +476,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
-            
+
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden relative z-10 flex flex-col md:flex-row animate-fade-in">
                 <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/50 hover:bg-white rounded-full text-gray-500 hover:text-gray-900 z-20">
                     <X className="w-5 h-5" />
@@ -560,9 +492,9 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                 {patient.name.charAt(0)}
                             </div>
                         )}
-                        <button 
+                        <button
                             onClick={handleStartCamera}
-                            className="absolute bottom-0 right-0 p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg transition-transform hover:scale-105" 
+                            className="absolute bottom-0 right-0 p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-lg transition-transform hover:scale-105"
                             title="Tirar foto com câmera"
                         >
                             <Camera className="w-4 h-4" />
@@ -577,17 +509,33 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Plano Ativo</p>
                             <p className="font-medium text-blue-700">{patient.plan.name}</p>
                         </div>
-                         <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
                             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Saldo</p>
                             <p className="font-medium text-gray-900">{patient.plan.remainingSessions} de {patient.plan.totalSessions} sessões</p>
+                        </div>
+                        <div className="bg-white p-3 rounded-lg border border-gray-200 shadow-sm">
+                            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Pagamento</p>
+                            <div className="flex items-center justify-between mt-1">
+                                <span className={`text-xs font-semibold px-2 py-1 rounded-full ${patient.plan.remainingSessions === patient.plan.totalSessions ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                                    {patient.plan.remainingSessions === patient.plan.totalSessions ? 'Pendente' : 'Confirmado'}
+                                </span>
+                                {patient.plan.remainingSessions === patient.plan.totalSessions && (
+                                    <button
+                                        onClick={() => setShowPaymentSignatureModal(true)}
+                                        className="text-xs px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700"
+                                    >
+                                        Assinar
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </div>
 
                     <div className="mt-auto w-full pt-6">
-                         <button className="w-full py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
-                             <UploadCloud className="w-4 h-4" />
-                             Upload Documento
-                         </button>
+                        <button className="w-full py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
+                            <UploadCloud className="w-4 h-4" />
+                            Upload Documento
+                        </button>
                     </div>
                 </div>
 
@@ -595,14 +543,14 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                 <div className="flex-1 flex flex-col min-h-0 bg-white">
                     <div className="border-b border-gray-200">
                         <nav className="flex gap-6 px-6" aria-label="Tabs">
-                            <button 
+                            <button
                                 onClick={() => setActiveTab('signatures')}
                                 className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'signatures' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                             >
                                 <FileSignature className="w-4 h-4" />
                                 Ficha de Assinaturas
                             </button>
-                            <button 
+                            <button
                                 onClick={() => setActiveTab('info')}
                                 className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 ${activeTab === 'info' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
                             >
@@ -620,7 +568,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                         <h3 className="font-bold text-gray-900">Gestão de Assinaturas Físicas</h3>
                                         <p className="text-sm text-gray-600">Imprima a ficha de presença para que o paciente assine fisicamente.</p>
                                     </div>
-                                    <button 
+                                    <button
                                         onClick={handlePrint}
                                         className="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg font-medium shadow-sm transition-colors text-sm flex items-center gap-2"
                                     >
@@ -645,7 +593,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                                 </thead>
                                                 <tbody className="divide-y divide-gray-100">
                                                     {patientHistory.map(session => {
-                                                        const prof = PROFESSIONALS.find(p => p.id === session.professionalId);
+                                                        const prof = professionals.find(p => p.id === session.professionalId);
                                                         return (
                                                             <tr key={session.id} className="hover:bg-gray-50">
                                                                 <td className="px-4 py-3 font-medium text-gray-900">
@@ -666,14 +614,14 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                                                 </td>
                                                                 <td className="px-4 py-3 text-right">
                                                                     {!session.signed && (
-                                                                         <button 
-                                                                             onClick={() => handleConfirmSignature(session.id)}
-                                                                             className="text-emerald-600 hover:text-emerald-800 font-medium text-xs border border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 px-2 py-1 rounded transition-colors flex items-center gap-1 ml-auto"
-                                                                             title="Confirmar que o paciente assinou no papel"
-                                                                         >
-                                                                             <Check className="w-3 h-3" />
-                                                                             Confirmar
-                                                                         </button>
+                                                                        <button
+                                                                            onClick={() => handleOpenSignatureModal(session.id)}
+                                                                            className="text-emerald-600 hover:text-emerald-800 font-medium text-xs border border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 px-2 py-1 rounded transition-colors flex items-center gap-1 ml-auto"
+                                                                            title="Assinar digitalmente"
+                                                                        >
+                                                                            <Check className="w-3 h-3" />
+                                                                            Assinar
+                                                                        </button>
                                                                     )}
                                                                 </td>
                                                             </tr>
@@ -699,7 +647,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                         <label className="block text-xs font-medium text-gray-500">Nome Completo</label>
                                         <input type="text" value={patient.name} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" />
                                     </div>
-                                     <div>
+                                    <div>
                                         <label className="block text-xs font-medium text-gray-500">Telefone</label>
                                         <input type="text" value={patient.phone} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" />
                                     </div>
@@ -708,13 +656,13 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                                         <input type="text" value={patient.cpf || ''} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" placeholder="Não informado" />
                                     </div>
                                 </div>
-                                 <div className="space-y-4">
+                                <div className="space-y-4">
                                     <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">Endereço</h3>
                                     <div>
                                         <label className="block text-xs font-medium text-gray-500">Cidade</label>
                                         <input type="text" value={patient.city || ''} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" placeholder="Não informado" />
                                     </div>
-                                     <div>
+                                    <div>
                                         <label className="block text-xs font-medium text-gray-500">Endereço</label>
                                         <input type="text" value={patient.address || ''} readOnly className="mt-1 w-full bg-gray-50 border border-gray-200 rounded-md px-3 py-2 text-sm text-gray-700" placeholder="Não informado" />
                                     </div>
@@ -722,7 +670,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
                             </div>
                         )}
                     </div>
-                    
+
                     {/* Modal Footer */}
                     <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3">
                         <button onClick={onClose} className="px-4 py-2 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50">
@@ -739,32 +687,290 @@ const PatientDetailModal = ({ patient, onClose, currentUnit }: { patient: Patien
             {showCamera && (
                 <div className="fixed inset-0 z-[60] bg-black bg-opacity-90 flex flex-col items-center justify-center p-4">
                     <div className="relative w-full max-w-md bg-black rounded-xl overflow-hidden shadow-2xl">
-                         <video 
-                            ref={videoRef} 
-                            autoPlay 
-                            playsInline 
+                        <video
+                            ref={videoRef}
+                            autoPlay
+                            playsInline
                             onLoadedMetadata={() => videoRef.current?.play()}
                             className="w-full h-auto bg-gray-900"
-                         />
-                         <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-8">
-                             <button 
-                                onClick={handleStopCamera} 
+                        />
+                        <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-8">
+                            <button
+                                onClick={handleStopCamera}
                                 className="bg-white/20 hover:bg-white/30 text-white rounded-full p-3 backdrop-blur-sm transition-colors"
-                             >
+                            >
                                 <X className="w-6 h-6" />
-                             </button>
-                             <button 
+                            </button>
+                            <button
                                 onClick={handleCapture}
                                 className="bg-white rounded-full p-4 hover:scale-105 transition-transform border-4 border-gray-200"
-                             >
+                            >
                                 <div className="w-12 h-12 bg-transparent rounded-full border-2 border-black/10" />
-                             </button>
-                         </div>
+                            </button>
+                        </div>
                     </div>
                     <p className="text-white mt-4 text-sm font-medium">Ajuste o rosto no quadro e clique no botão central para capturar.</p>
                 </div>
             )}
+
+            {/* Session Signature Modal */}
+            {showSignatureModal && (
+                <SignatureModal
+                    title="Assinar Sessão"
+                    description="Desenhe sua assinatura ou tire uma foto para confirmar a sessão."
+                    onConfirm={handleConfirmSignature}
+                    onCancel={() => { setShowSignatureModal(false); setSessionToSign(null); }}
+                />
+            )}
+
+            {/* Payment Signature Modal */}
+            {showPaymentSignatureModal && (
+                <SignatureModal
+                    title="Confirmar Pagamento"
+                    description="Desenhe sua assinatura ou tire uma foto para confirmar o pagamento do plano."
+                    onConfirm={handleConfirmPayment}
+                    onCancel={() => setShowPaymentSignatureModal(false)}
+                />
+            )}
         </div>
+    );
+};
+
+
+const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+    const [patientsList, setPatientsList] = useState<Patient[]>([]);
+    const [planTemplates, setPlanTemplates] = useState<PlanTemplate[]>([]);
+    const [professionals, setProfessionals] = useState<Professional[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [unitName, setUnitName] = useState('');
+    const [allUnits, setAllUnits] = useState<Unit[]>([]);
+
+    useEffect(() => {
+        loadData();
+    }, [currentUnit]);
+
+    async function loadData() {
+        try {
+            setLoading(true);
+            const [patientsData, plansData, professionalsData, unitData, allUnitsData] = await Promise.all([
+                patientsApi.getAll(),
+                planTemplatesApi.getAll(),
+                professionalsApi.getAll(),
+                unitsApi.getById(currentUnit),
+                unitsApi.getAll()
+            ]);
+            setPatientsList(patientsData);
+            setPlanTemplates(plansData);
+            setProfessionals(professionalsData);
+            setUnitName(unitData.name);
+            setAllUnits(allUnitsData);
+        } catch (error) {
+            console.error('Error loading data:', error);
+            // toast.error('Erro ao carregar dados');
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    const filteredPatients = patientsList.filter(patient => {
+        // const matchesUnit = patient.unitId === currentUnit; // Removed: Show all patients globally
+        const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (patient.cpf && patient.cpf.includes(searchTerm));
+        return matchesSearch;
+    });
+
+    const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+
+    const handleCreatePatient = async (patientData: Patient) => {
+        try {
+            if (editingPatient) {
+                await patientsApi.update(patientData.id, patientData);
+                toast.success('Paciente atualizado com sucesso!');
+            } else {
+                await patientsApi.create(patientData);
+                toast.success('Paciente cadastrado com sucesso!');
+            }
+            setIsCreateModalOpen(false);
+            setEditingPatient(null);
+            loadData();
+        } catch (error) {
+            console.error('Error saving patient:', error);
+            toast.error('Erro ao salvar paciente');
+        }
+    };
+
+    const handleDeletePatient = async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (confirm('Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.')) {
+            try {
+                await patientsApi.delete(id);
+                toast.success('Paciente excluído com sucesso');
+                loadData();
+            } catch (error) {
+                console.error('Error deleting patient:', error);
+                toast.error('Erro ao excluir paciente');
+            }
+        }
+    };
+
+    const handleToggleStatus = async (patient: Patient, e: React.MouseEvent) => {
+        e.stopPropagation();
+        try {
+            const newStatus = patient.status === 'Active' ? 'Inactive' : 'Active';
+            await patientsApi.update(patient.id, { status: newStatus });
+            toast.success(`Paciente ${newStatus === 'Active' ? 'ativado' : 'inativado'} com sucesso`);
+            loadData();
+        } catch (error) {
+            console.error('Error updating status:', error);
+            toast.error('Erro ao atualizar status');
+        }
+    };
+
+    const openEditModal = (patient: Patient, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingPatient(patient);
+        setIsCreateModalOpen(true);
+    };
+
+    return (
+        <div className="space-y-6 animate-fade-in">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Pacientes</h1>
+                    <p className="text-gray-500">Gestão de prontuários e tratamentos - {unitName}</p>
+                </div>
+                <button
+                    onClick={() => { setEditingPatient(null); setIsCreateModalOpen(true); }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 shadow-sm"
+                >
+                    <UserPlus className="w-4 h-4" />
+                    Novo Paciente
+                </button>
+            </div>
+
+            <div className="flex gap-4">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <input
+                        type="text"
+                        placeholder="Buscar por nome ou CPF..."
+                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                    />
+                </div>
+                <button className="px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 flex items-center gap-2">
+                    <Filter className="w-4 h-4" />
+                    Filtros
+                </button>
+            </div>
+
+            {loading ? (
+                <div className="flex justify-center p-8 text-gray-500">Carregando pacientes...</div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {filteredPatients.map(patient => (
+                        <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer group relative">
+
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="flex items-center gap-3">
+                                    {patient.photoUrl ? (
+                                        <img src={patient.photoUrl} alt={patient.name} className="w-12 h-12 rounded-full object-cover" />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 font-bold text-lg group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
+                                            {patient.name.charAt(0)}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <h3 className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors">{patient.name}</h3>
+                                        <p className="text-xs text-gray-500">{patient.phone}</p>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col items-end gap-1">
+                                    <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-full">
+                                        {allUnits.find(u => u.id === patient.unitId)?.name || 'N/A'}
+                                    </span>
+                                    <span className={`px-2 py-1 rounded text-xs font-medium ${patient.status === 'Active' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
+                                        }`}>
+                                        {patient.status === 'Active' ? 'Em Tratamento' : 'Inativo'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3 mb-4">
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-500">Plano</span>
+                                    <span className="font-medium text-gray-900">{patient.plan.name}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                    <span className="text-gray-500">Sessões</span>
+                                    <span className="font-medium text-gray-900">{patient.plan.remainingSessions} / {patient.plan.totalSessions}</span>
+                                </div>
+                                <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
+                                    <div
+                                        className="bg-blue-600 h-1.5 rounded-full"
+                                        style={{ width: `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` }}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            < div className="flex justify-end gap-2 pt-3 border-t border-gray-50 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" >
+                                <button
+                                    onClick={(e) => openEditModal(patient, e)}
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Editar"
+                                >
+                                    <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                    onClick={(e) => handleToggleStatus(patient, e)}
+                                    className={`p-1.5 rounded-lg transition-colors ${patient.status === 'Active' ? 'text-orange-600 hover:bg-orange-50' : 'text-green-600 hover:bg-green-50'}`}
+                                    title={patient.status === 'Active' ? 'Inativar' : 'Ativar'}
+                                >
+                                    {patient.status === 'Active' ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                                </button>
+                                <button
+                                    onClick={(e) => handleDeletePatient(patient.id, e)}
+                                    className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                    title="Excluir"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                    ))
+                    }
+                </div >
+            )}
+
+            {
+                isCreateModalOpen && (
+                    <CreatePatientModal
+                        onClose={() => { setIsCreateModalOpen(false); setEditingPatient(null); }}
+                        onSave={handleCreatePatient}
+                        currentUnit={currentUnit}
+                        planTemplates={planTemplates}
+                        initialData={editingPatient}
+                    />
+                )
+            }
+
+            {
+                selectedPatient && (
+                    <PatientDetailModal
+                        patient={selectedPatient}
+                        onClose={() => setSelectedPatient(null)}
+                        currentUnit={currentUnit}
+                        professionals={professionals}
+                    />
+                )
+            }
+        </div >
     );
 };
 
