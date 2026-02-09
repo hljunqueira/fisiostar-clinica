@@ -46,6 +46,8 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
         }
     }, [searchParams]);
 
+    const [units, setUnits] = useState<Unit[]>([]);
+
     // Load data
     useEffect(() => {
         loadData();
@@ -53,18 +55,29 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
 
     async function loadData() {
         try {
-            const [sessionsData, patientsData, professionalsData, unitData] = await Promise.all([
+            // Se currentUnit for 'ALL', buscamos todas as unidades para ter a lista completa
+            // Se for específico, também precisamos da lista para nomes, mas focamos na unidade
+            const [sessionsData, patientsData, professionalsData, unitsData] = await Promise.all([
                 sessionsApi.getAll(),
                 patientsApi.getAll(),
                 professionalsApi.getAll(),
-                unitsApi.getById(currentUnit)
+                unitsApi.getAll()
             ]);
 
-            const unitSessions = sessionsData.filter(s => s.unitId === currentUnit);
-            setSessions(unitSessions);
+            setUnits(unitsData);
+
+            if (currentUnit === 'ALL') {
+                setSessions(sessionsData);
+                setUnit(null); // 'ALL' units
+            } else {
+                const unitSessions = sessionsData.filter(s => s.unitId === currentUnit);
+                setSessions(unitSessions);
+                const currentUnitData = unitsData.find(u => u.id === currentUnit) || null;
+                setUnit(currentUnitData);
+            }
+
             setPatients(patientsData);
             setProfessionals(professionalsData);
-            setUnit(unitData);
 
         } catch (error) {
             console.error('Error loading schedule data:', error);
@@ -79,6 +92,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
         const isStatus = filterStatus === 'all' || s.status === filterStatus;
         return isProf && isSpecialty && isStatus;
     });
+
 
     const handleSyncGoogle = () => {
         setIsSyncing(true);
@@ -166,6 +180,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         professionals={professionals}
                         patients={patients}
                         unit={unit}
+                        units={units}
                         onEditSession={handleEditSession}
                         onUpdateSession={handleUpdateSession}
                     />
@@ -192,6 +207,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         sessions={filteredSessions}
                         professionals={professionals}
                         patients={patients}
+                        units={units}
                         onEditSession={handleEditSession}
                     />
                 );
@@ -202,6 +218,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         sessions={filteredSessions}
                         professionals={professionals}
                         patients={patients}
+                        units={units}
                         onEditSession={handleEditSession}
                     />
                 );
@@ -213,6 +230,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         professionals={professionals}
                         patients={patients}
                         unit={unit}
+                        units={units}
                         onEditSession={handleEditSession}
                         onDateClick={(date) => {
                             setSelectedDate(date);

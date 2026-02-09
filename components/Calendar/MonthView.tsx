@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Session, SessionStatus, Professional, Patient } from '../../types';
+import { Session, SessionStatus, Professional, Patient, Unit } from '../../types';
 import { GripVertical } from 'lucide-react';
 
 interface MonthViewProps {
@@ -8,6 +8,7 @@ interface MonthViewProps {
     sessions: Session[];
     professionals: Professional[];
     patients: Patient[];
+    units?: Unit[]; // Optional if not used yet, but passed by Schedule
     onEditSession: (session: Session) => void;
     onDateClick: (date: Date) => void;
     onUpdateSession?: (sessionId: string, updates: Partial<Session>) => void;

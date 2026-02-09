@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
+import DataSeeder from './DataSeeder';
 import { UserRole, RolePermissions, PermissionKey, SystemUser, PlanTemplate, Specialty } from '../types';
 import {
     Shield, UserCog, Save,
@@ -369,6 +370,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         </div>
                                     </div>
                                 </div>
+                                <DataSeeder />
                             </div>
                         )}
 
@@ -380,7 +382,7 @@ const Settings: React.FC<SettingsProps> = ({
                                         Usuários Cadastrados
                                     </div>
                                     <div className="divide-y divide-gray-100 max-h-[400px] overflow-y-auto">
-                                        {users.filter(u => u.role !== 'professional').map(user => (
+                                        {users.map(user => (
                                             <button
                                                 key={user.id}
                                                 onClick={() => setSelectedUserId(user.id)}
@@ -388,7 +390,9 @@ const Settings: React.FC<SettingsProps> = ({
                                             >
                                                 <div>
                                                     <p className="font-medium text-gray-900 text-sm">{user.name}</p>
-                                                    <p className="text-xs text-gray-500 capitalize">{user.role}</p>
+                                                    <p className="text-xs text-gray-500 capitalize">
+                                                        {user.role === 'admin' ? 'Administrador' : user.role === 'professional' ? 'Profissional' : 'Secretária'}
+                                                    </p>
                                                 </div>
                                                 <UserCog className={`w-4 h-4 ${selectedUserId === user.id ? 'text-blue-600' : 'text-gray-300'}`} />
                                             </button>
@@ -438,7 +442,8 @@ const Settings: React.FC<SettingsProps> = ({
                                                     </div>
                                                 </div>
                                                 <span className="px-2 py-1 bg-white border border-gray-200 rounded text-xs font-semibold uppercase text-gray-600">
-                                                    {selectedUser.role}
+                                                    {selectedUser.role === 'admin' ? 'Administrador' : selectedUser.role === 'professional' ? 'Profissional' : 'Secretária'}
+
                                                 </span>
                                             </div>
                                             <div className="space-y-1">

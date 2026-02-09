@@ -174,12 +174,17 @@ export const expensesApi = {
     /**
      * Get all expenses for a unit
      */
-    async getAll(unitId: string): Promise<Expense[]> {
-        const { data, error } = await supabase
+    async getAll(unitId?: string): Promise<Expense[]> {
+        let query = supabase
             .from('expenses')
             .select('*')
-            .eq('unit_id', unitId)
             .order('expense_date', { ascending: false });
+
+        if (unitId && unitId !== 'ALL') {
+            query = query.eq('unit_id', unitId);
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 
@@ -321,7 +326,7 @@ export const revenuesApi = {
         let query = supabase
             .from('revenues')
             .select('*')
-            .order('revenue_date', { ascending: false });
+            .order('date', { ascending: false });
 
         if (filters?.unitId) {
             query = query.eq('unit_id', filters.unitId);
@@ -333,10 +338,10 @@ export const revenuesApi = {
             query = query.eq('category', filters.category);
         }
         if (filters?.startDate) {
-            query = query.gte('revenue_date', filters.startDate);
+            query = query.gte('date', filters.startDate);
         }
         if (filters?.endDate) {
-            query = query.lte('revenue_date', filters.endDate);
+            query = query.lte('date', filters.endDate);
         }
         if (filters?.received !== undefined) {
             query = query.eq('received', filters.received);
@@ -353,7 +358,7 @@ export const revenuesApi = {
             category: r.category,
             description: r.description,
             amount: r.amount,
-            revenueDate: r.revenue_date,
+            revenueDate: r.date,
             paymentMethod: r.payment_method,
             received: r.received,
             receivedAt: r.received_at,
@@ -376,7 +381,7 @@ export const revenuesApi = {
                 category: revenue.category,
                 description: revenue.description,
                 amount: revenue.amount,
-                revenue_date: revenue.revenueDate,
+                date: revenue.revenueDate,
                 payment_method: revenue.paymentMethod,
                 created_by: revenue.createdBy
             })
@@ -393,7 +398,7 @@ export const revenuesApi = {
             category: data.category,
             description: data.description,
             amount: data.amount,
-            revenueDate: data.revenue_date,
+            revenueDate: data.date,
             paymentMethod: data.payment_method,
             received: data.received,
             receivedAt: data.received_at,
@@ -427,7 +432,7 @@ export const revenuesApi = {
             category: data.category,
             description: data.description,
             amount: data.amount,
-            revenueDate: data.revenue_date,
+            revenueDate: data.date,
             paymentMethod: data.payment_method,
             received: data.received,
             receivedAt: data.received_at,

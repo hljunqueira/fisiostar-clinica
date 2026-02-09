@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Session, SessionStatus, Professional, Patient } from '../../types';
+import { Session, SessionStatus, Professional, Patient, Unit } from '../../types';
 import { Clock, CheckCircle, AlertCircle, XCircle, User, Calendar, MapPin } from 'lucide-react';
 
 interface DayListViewProps {
@@ -8,6 +8,7 @@ interface DayListViewProps {
     sessions: Session[];
     professionals: Professional[];
     patients: Patient[];
+    units: Unit[];
     onEditSession: (session: Session) => void;
 }
 
@@ -36,7 +37,7 @@ const getStatusInfo = (status: SessionStatus) => {
     }
 };
 
-const DayListView: React.FC<DayListViewProps> = ({ date, sessions, professionals, patients, onEditSession }) => {
+const DayListView: React.FC<DayListViewProps> = ({ date, sessions, professionals, patients, units, onEditSession }) => {
     const selectedYMD = formatDateYMD(date);
     const daySessions = sessions.filter(s => s.date === selectedYMD);
 
@@ -90,13 +91,20 @@ const DayListView: React.FC<DayListViewProps> = ({ date, sessions, professionals
 
                                 {/* Main Info */}
                                 <div className="flex-1">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <User className="w-4 h-4 text-gray-400" />
-                                        <p className="font-semibold text-gray-900">{patient?.name || 'Paciente'}</p>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                                        <span className="bg-gray-100 px-2 py-0.5 rounded">{session.type}</span>
-                                        <span>{prof?.name}</span>
+                                    <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <User className="w-4 h-4 text-gray-400" />
+                                            <p className="font-semibold text-gray-900">{patient?.name || 'Paciente'}</p>
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                            <span className="bg-gray-100 px-2 py-0.5 rounded">{session.type}</span>
+                                            <div className="flex flex-col">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                                    {units.find(u => u.id === session.unitId)?.name || 'Unidade'}
+                                                </span>
+                                                <span className="font-medium text-gray-700">{prof?.name}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 

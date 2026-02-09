@@ -44,7 +44,15 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
     isSyncing,
     hideProfessionalFilter = false
 }) => {
-    const unitProfessionals = professionals.filter(p => unit && p.unitIds.includes(unit.id));
+    // If unit is null (All Units), show all professionals. Otherwise filter by unit.
+    const unitProfessionals = unit
+        ? professionals.filter(p => p.unitIds.includes(unit.id))
+        : professionals;
+
+    // Get specialties: from unit if selected, otherwise from all professionals
+    const specialties = unit
+        ? unit.specialties
+        : Array.from(new Set(professionals.map(p => p.specialty).filter(Boolean)));
 
     // Calculate week range for display
     const getWeekRange = () => {
@@ -129,7 +137,7 @@ const CalendarHeader: React.FC<CalendarHeaderProps> = ({
                         onChange={(e) => setFilterSpecialty(e.target.value)}
                     >
                         <option value="all">Todas especialidades</option>
-                        {unit?.specialties.map(spec => (
+                        {specialties.map(spec => (
                             <option key={spec} value={spec}>{spec}</option>
                         ))}
                     </select>

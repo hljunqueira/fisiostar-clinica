@@ -2,8 +2,18 @@ import { supabase } from '../lib/supabase';
 import type {
     Unit, Professional, Patient, Session, Specialty,
     PlanTemplate, Announcement, SystemUser, SessionStatus,
-    DaySchedule, Holiday, PermissionKey, Notification as SystemNotification
+    DaySchedule, Holiday, PermissionKey
 } from '../types';
+
+export interface SystemNotification {
+    id: string;
+    userId: string;
+    title: string;
+    message: string;
+    read: boolean;
+    type: 'info' | 'warning' | 'success' | 'error';
+    createdAt: string;
+}
 
 // =====================================================
 // --- Notifications API ---
@@ -293,6 +303,15 @@ export const professionalsApi = {
             .eq('id', id);
 
         if (error) throw error;
+    },
+
+    async deleteAll(): Promise<void> {
+        const { error } = await supabase
+            .from('professionals')
+            .delete()
+            .neq('id', '00000000-0000-0000-0000-000000000000');
+
+        if (error) throw error;
     }
 };
 
@@ -351,13 +370,20 @@ export const patientsApi = {
 
         // Create patient plan if provided
         if (patient.plan) {
-            await supabase.from('patient_plans').insert({
+            const { error: planError } = await supabase.from('patient_plans').insert({
                 patient_id: data.id,
                 name: patient.plan.name,
                 total_sessions: patient.plan.totalSessions,
                 remaining_sessions: patient.plan.remainingSessions,
                 expires_at: patient.plan.expiresAt
             });
+
+            if (planError) {
+                console.error('Error creating patient plan:', planError);
+                // We don't throw here to avoid failing the whole patient creation, 
+                // but we should probably log it. 
+                // Alternatively, we could throw. Let's log for now.
+            }
         }
 
         return this.getById(data.id);
@@ -426,6 +452,15 @@ export const patientsApi = {
             .from('patients')
             .delete()
             .eq('id', id);
+
+        if (error) throw error;
+    },
+
+    async deleteAll(): Promise<void> {
+        const { error } = await supabase
+            .from('patients')
+            .delete()
+            .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all
 
         if (error) throw error;
     }
@@ -788,6 +823,35 @@ export const announcementsApi = {
 // =====================================================
 
 export const systemUsersApi = {
+    async create(user: Omit<SystemUser, 'id'>): Promise<SystemUser> {
+        // Note: This creates a system user record only. 
+        // For real auth, they would need an auth.users entry (handled by demo_users.sql or auth signup).
+        // For seeded secretaries, we just want them to appear in the list.
+        const { data, error } = await supabase
+            .from('system_users')
+            .insert({
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                unit_id: user.unitId,
+                avatar_url: user.avatarUrl
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return {
+            id: data.id,
+            name: data.name,
+            email: data.email,
+            role: data.role,
+            unitId: data.unit_id,
+            avatarUrl: data.avatar_url,
+            customPermissions: data.custom_permissions || []
+        };
+    },
+
     async getAll(): Promise<SystemUser[]> {
         const { data, error } = await supabase
             .from('system_users')
@@ -887,6 +951,15 @@ export const systemUsersApi = {
             .from('system_users')
             .delete()
             .eq('id', id);
+
+        if (error) throw error;
+    },
+
+    async deleteAllSecretaries(): Promise<void> {
+        const { error } = await supabase
+            .from('system_users')
+            .delete()
+            .eq('role', 'secretary');
 
         if (error) throw error;
     }

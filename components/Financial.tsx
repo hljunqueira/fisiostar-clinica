@@ -5,7 +5,7 @@ import { DollarSign, Calendar, CheckCircle2, Clock, Download, Filter, Plus, Tren
 import { UnitId, Professional, Patient } from '../types';
 import type { Payment, Expense, Revenue, CreateExpense, CreateRevenue } from '../src/types/financial';
 import { paymentsApi, expensesApi, revenuesApi } from '../src/services/financial-api';
-import { professionalsApi, patientsApi } from '../src/services/api';
+import { professionalsApi, patientsApi, unitsApi } from '../src/services/api';
 import toast from 'react-hot-toast';
 
 interface FinancialProps {
@@ -23,6 +23,7 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
     const [revenues, setRevenues] = useState<Revenue[]>([]);
     const [professionals, setProfessionals] = useState<Professional[]>([]);
     const [patients, setPatients] = useState<Patient[]>([]);
+    const [units, setUnits] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [period, setPeriod] = useState<PeriodFilter>('month');
 
@@ -40,18 +41,20 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
     async function loadData() {
         try {
             setLoading(true);
-            const [paymentsData, expensesData, revenuesData, professionalsData, patientsData] = await Promise.all([
+            const [paymentsData, expensesData, revenuesData, professionalsData, patientsData, unitsData] = await Promise.all([
                 paymentsApi.getAll(),
-                expensesApi.getAll(currentUnit),
-                revenuesApi.getAll({ unitId: currentUnit }),
+                expensesApi.getAll(currentUnit === 'ALL' ? undefined : currentUnit),
+                revenuesApi.getAll(currentUnit === 'ALL' ? {} : { unitId: currentUnit }),
                 professionalsApi.getAll(),
-                patientsApi.getAll()
+                patientsApi.getAll(),
+                unitsApi.getAll()
             ]);
             setPayments(paymentsData);
             setExpenses(expensesData);
             setRevenues(revenuesData);
             setProfessionals(professionalsData);
             setPatients(patientsData);
+            setUnits(unitsData);
         } catch (error) {
             console.error('Error loading financial data:', error);
             toast.error('Erro ao carregar dados financeiros');
@@ -280,6 +283,7 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
                 <ExpenseModal
                     expense={selectedExpense}
                     unitId={currentUnit}
+                    units={units}
                     userId={currentUserId}
                     onSave={async (expenseData) => {
                         try {
@@ -300,6 +304,7 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
             {showRevenueModal && (
                 <RevenueModal
                     unitId={currentUnit}
+                    units={units}
                     userId={currentUserId}
                     patients={patients}
                     onSave={async (revenueData) => {
@@ -545,12 +550,13 @@ const PaymentsTable = ({ payments, professionals, onMarkAsPaid }: { payments: Pa
 };
 
 // Expense Modal
-const ExpenseModal = ({ expense, unitId, userId, onSave, onCancel }: { expense: Expense | null, unitId: string, userId: string, onSave: (e: CreateExpense) => void, onCancel: () => void }) => {
+const ExpenseModal = ({ expense, unitId, units, userId, onSave, onCancel }: { expense: Expense | null, unitId: string, units: any[], userId: string, onSave: (e: CreateExpense) => void, onCancel: () => void }) => {
     const [formData, setFormData] = useState({
         category: expense?.category || 'other',
         description: expense?.description || '',
         amount: expense?.amount || 0,
-        expenseDate: expense?.expenseDate || new Date().toISOString().split('T')[0]
+        expenseDate: expense?.expenseDate || new Date().toISOString().split('T')[0],
+        unitId: unitId === 'ALL' ? (expense?.unitId || units[0]?.id) : unitId
     });
 
     return (
@@ -564,6 +570,20 @@ const ExpenseModal = ({ expense, unitId, userId, onSave, onCancel }: { expense: 
                 </div>
 
                 <div className="space-y-4">
+                    {unitId === 'ALL' && (
+                        <div>
+                            <label className="text-sm font-medium text-gray-700 block mb-1">Unidade</label>
+                            <select
+                                value={formData.unitId}
+                                onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                                {units.map(u => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <div>
                         <label className="text-sm font-medium text-gray-700 block mb-1">Categoria</label>
                         <select
@@ -619,7 +639,7 @@ const ExpenseModal = ({ expense, unitId, userId, onSave, onCancel }: { expense: 
                         Cancelar
                     </button>
                     <button
-                        onClick={() => onSave({ ...formData, unitId, createdBy: userId })}
+                        onClick={() => onSave({ ...formData, unitId: formData.unitId || unitId, createdBy: userId })}
                         className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
                     >
                         Salvar
@@ -631,14 +651,15 @@ const ExpenseModal = ({ expense, unitId, userId, onSave, onCancel }: { expense: 
 };
 
 // Revenue Modal
-const RevenueModal = ({ unitId, userId, patients, onSave, onCancel }: { unitId: string, userId: string, patients: Patient[], onSave: (r: CreateRevenue) => void, onCancel: () => void }) => {
+const RevenueModal = ({ unitId, units, userId, patients, onSave, onCancel }: { unitId: string, units: any[], userId: string, patients: Patient[], onSave: (r: CreateRevenue) => void, onCancel: () => void }) => {
     const [formData, setFormData] = useState({
         category: 'other' as 'patient_plan' | 'session' | 'other',
         description: '',
         amount: 0,
         revenueDate: new Date().toISOString().split('T')[0],
         patientId: '',
-        paymentMethod: 'pix' as 'pix' | 'cash' | 'credit_card' | 'debit_card' | 'bank_transfer'
+        paymentMethod: 'pix' as 'pix' | 'cash' | 'credit_card' | 'debit_card' | 'bank_transfer',
+        unitId: unitId === 'ALL' ? units[0]?.id : unitId
     });
 
     return (
@@ -734,7 +755,7 @@ const RevenueModal = ({ unitId, userId, patients, onSave, onCancel }: { unitId: 
                     <button
                         onClick={() => onSave({
                             ...formData,
-                            unitId,
+                            unitId: formData.unitId || unitId,
                             createdBy: userId,
                             patientId: formData.patientId || undefined
                         })}

@@ -1,14 +1,15 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { Session, SessionStatus, Professional, Patient, Unit, WeekDay } from '../../types';
-import { GripVertical } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical } from 'lucide-react';
 
 interface WeekViewProps {
     currentDate: Date;
     sessions: Session[];
     professionals: Professional[];
     patients: Patient[];
-    unit?: Unit | null;
+    unit: Unit | null;
+    units: Unit[]; // Added units list
     onEditSession: (session: Session) => void;
     onDateClick: (date: Date) => void;
     onUpdateSession?: (sessionId: string, updates: Partial<Session>) => void;
@@ -56,7 +57,7 @@ const getStatusOverrideColor = (status: SessionStatus) => {
     }
 };
 
-const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professionals, patients, unit, onEditSession, onDateClick, onUpdateSession }) => {
+const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professionals, patients, unit, units, onEditSession, onDateClick, onUpdateSession }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draggingSession, setDraggingSession] = useState<Session | null>(null);
     const [dragOffset, setDragOffset] = useState({ y: 0 });
@@ -275,9 +276,14 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                             title={`${session.time} - ${patient?.name} (${profName}) - Arraste para mover`}
                                         >
                                             <div className="flex items-start justify-between">
-                                                <div className="flex-1 overflow-hidden">
-                                                    <div className="font-semibold truncate">[{profName}] {patient?.name}</div>
-                                                    <div className="opacity-80 truncate">{session.time.substring(0, 5)} - {session.type}</div>
+                                                <div className="flex flex-col flex-1 min-h-0">
+                                                    <div className="font-bold truncate text-[10px] leading-3">
+                                                        <span className="block text-[8px] text-gray-500 uppercase tracking-tighter mb-0.5">
+                                                            {units.find(u => u.id === session.unitId)?.name || 'Unidade'}
+                                                        </span>
+                                                        [{profName}] {patient?.name}
+                                                    </div>
+                                                    <div className="opacity-80 truncate text-[9px] mt-0.5">{session.type}</div>
                                                 </div>
                                                 {onUpdateSession && <GripVertical className="w-3 h-3 opacity-50 shrink-0" />}
                                             </div>

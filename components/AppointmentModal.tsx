@@ -153,21 +153,21 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
                         </div>
 
                         {selectedPatient && (
-                            <div className={`p-4 rounded-lg border ${selectedPatient.plan.remainingSessions > 0 ? 'bg-blue-50 border-blue-100' : 'bg-red-50 border-red-100'} flex items-start gap-3 transition-all`}>
-                                <FileText className={`w-5 h-5 mt-0.5 ${selectedPatient.plan.remainingSessions > 0 ? 'text-blue-600' : 'text-red-600'}`} />
+                            <div className={`p-4 rounded-lg border ${selectedPatient.plan?.remainingSessions > 0 ? 'bg-blue-50 border-blue-100' : 'bg-red-50 border-red-100'} flex items-start gap-3 transition-all`}>
+                                <FileText className={`w-5 h-5 mt-0.5 ${selectedPatient.plan?.remainingSessions > 0 ? 'text-blue-600' : 'text-red-600'}`} />
                                 <div className="flex-1">
                                     <div className="flex justify-between items-center mb-1">
-                                        <h4 className={`font-bold text-sm ${selectedPatient.plan.remainingSessions > 0 ? 'text-blue-900' : 'text-red-900'}`}>
-                                            Plano: {selectedPatient.plan.name}
+                                        <h4 className={`font-bold text-sm ${selectedPatient.plan?.remainingSessions > 0 ? 'text-blue-900' : 'text-red-900'}`}>
+                                            Plano: {selectedPatient.plan?.name || 'N/A'}
                                         </h4>
-                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${selectedPatient.plan.remainingSessions > 0 ? 'bg-blue-200 text-blue-800' : 'bg-red-200 text-red-800'}`}>
-                                            {selectedPatient.plan.remainingSessions} restantes
+                                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${selectedPatient.plan?.remainingSessions > 0 ? 'bg-blue-200 text-blue-800' : 'bg-red-200 text-red-800'}`}>
+                                            {selectedPatient.plan?.remainingSessions || 0} restantes
                                         </span>
                                     </div>
-                                    <p className={`text-xs ${selectedPatient.plan.remainingSessions > 0 ? 'text-blue-700' : 'text-red-700'}`}>
-                                        Vence em: {new Date(selectedPatient.plan.expiresAt).toLocaleDateString('pt-BR')}
+                                    <p className={`text-xs ${selectedPatient.plan?.remainingSessions > 0 ? 'text-blue-700' : 'text-red-700'}`}>
+                                        Vence em: {selectedPatient.plan?.expiresAt ? new Date(selectedPatient.plan.expiresAt).toLocaleDateString('pt-BR') : 'N/A'}
                                     </p>
-                                    {selectedPatient.plan.remainingSessions === 0 && (
+                                    {selectedPatient.plan?.remainingSessions === 0 && (
                                         <p className="text-xs font-bold text-red-600 mt-2 flex items-center gap-1">
                                             <AlertCircle className="w-3 h-3" /> Paciente sem saldo de sessões. Agendamento será avulso ou pendente de renovação.
                                         </p>

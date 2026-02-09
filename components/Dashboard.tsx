@@ -284,7 +284,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <div className="text-right">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${patient.plan!.remainingSessions === 0 ? 'bg-gray-100 text-gray-600' : 'bg-blue-50 text-blue-700'
                         }`}>
-                        {patient.plan!.remainingSessions} left
+                        {patient.plan!.remainingSessions} restantes
                       </span>
                       <div className="mt-1">
                         {isExpired ? (
@@ -294,7 +294,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                           </span>
                         ) : (
                           <span className={`text-[10px] block ${expiresSoon ? 'text-orange-600 font-medium' : 'text-gray-400'}`}>
-                            Exp: {expDateFormatted}
+                            Vence: {expDateFormatted}
                           </span>
                         )}
                       </div>

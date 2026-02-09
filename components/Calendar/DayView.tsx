@@ -1,14 +1,15 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Session, SessionStatus, Professional, Patient, Unit, WeekDay } from '../../types';
-import { Clock, CheckCircle, AlertCircle, XCircle, GripVertical } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical } from 'lucide-react';
 
 interface DayViewProps {
     date: Date;
     sessions: Session[];
     professionals: Professional[];
     patients: Patient[];
-    unit?: Unit | null;
+    unit: Unit | null;
+    units: Unit[]; // Added units list
     onEditSession: (session: Session) => void;
     onUpdateSession?: (sessionId: string, updates: Partial<Session>) => void;
 }
@@ -57,7 +58,7 @@ const getStatusOverrideColor = (status: SessionStatus) => {
     }
 };
 
-const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patients, unit, onEditSession, onUpdateSession }) => {
+const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patients, unit, units, onEditSession, onUpdateSession }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
     const [draggingSession, setDraggingSession] = useState<Session | null>(null);
@@ -235,6 +236,9 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                         <div className="flex justify-between items-start h-full">
                                             <div className="flex flex-col justify-between h-full overflow-hidden">
                                                 <div>
+                                                    <span className="block text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
+                                                        {units.find(u => u.id === session.unitId)?.name || 'UNIDADE'}
+                                                    </span>
                                                     <div className="font-bold truncate">[{profName}] {patient?.name}</div>
                                                     <div className="opacity-80 truncate text-[10px]">{session.type}</div>
                                                 </div>

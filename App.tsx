@@ -217,7 +217,9 @@ const Layout: React.FC<LayoutProps> = ({
   setDarkMode
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const selectedUnit = units.find(u => u.id === currentUnit) || units[0] || { id: '', name: 'Carregando...', city: '', active: false };
+  const selectedUnit = currentUnit === 'ALL'
+    ? { id: 'ALL', name: 'Todas as Unidades', city: 'Visão Geral', isActive: true, specialties: [], hasPool: false } as Unit
+    : units.find(u => u.id === currentUnit) || units[0] || { id: '', name: 'Carregando...', city: '', specialties: [], hasPool: false, isActive: false };
   const { pathname } = useLocation();
 
   return (
@@ -268,6 +270,23 @@ const Layout: React.FC<LayoutProps> = ({
               {/* Dropdown */}
               <div className="absolute top-full left-0 w-full sm:w-80 bg-white rounded-xl shadow-xl border border-gray-100 mt-2 p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-30 transform origin-top scale-95 group-hover:scale-100">
                 <p className="px-3 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Selecione uma Unidade</p>
+                <button
+                  onClick={() => setCurrentUnit('ALL')}
+                  className={`w-full text-left px-3 py-3 rounded-lg flex items-center justify-between group/item transition-all ${currentUnit === 'ALL' ? 'bg-primary/5' : 'hover:bg-gray-50'
+                    }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-2 h-2 rounded-full ring-2 ring-white shadow-sm ${currentUnit === 'ALL' ? 'bg-primary' : 'bg-gray-300'}`} />
+                    <div>
+                      <p className={`font-semibold text-sm ${currentUnit === 'ALL' ? 'text-primary' : 'text-gray-700'}`}>
+                        Todas as Unidades
+                      </p>
+                      <p className="text-xs text-gray-500">Visão Geral</p>
+                    </div>
+                  </div>
+                  {currentUnit === 'ALL' && <Check className="w-4 h-4 text-primary" />}
+                </button>
+                <div className="h-px bg-gray-100 my-1 mx-3" />
                 {units.map(unit => (
                   <button
                     key={unit.id}

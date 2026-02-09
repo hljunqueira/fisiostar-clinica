@@ -43,17 +43,20 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({ currentUnit, pr
     const [mySessions, setMySessions] = useState<Session[]>([]);
     const [patients, setPatients] = useState<Patient[]>([]);
     const [unit, setUnit] = useState<Unit | null>(null);
+    const [units, setUnits] = useState<Unit[]>([]);
     const [loading, setLoading] = useState(true);
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const [profs, sess, pats, unitData] = await Promise.all([
+            const [profs, sess, pats, unitsData] = await Promise.all([
                 professionalsApi.getAll(),
                 sessionsApi.getAll(),
                 patientsApi.getAll(),
-                unitsApi.getById(currentUnit)
+                unitsApi.getAll()
             ]);
+
+            setUnits(unitsData);
 
             // Find professional: first try by prop ID, then by systemUser name match
             let currentProfessional: Professional | null = null;
@@ -78,7 +81,12 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({ currentUnit, pr
             setMySessions(filteredSessions);
 
             setPatients(pats);
-            setUnit(unitData);
+
+            if (currentUnit === 'ALL') {
+                setUnit(null);
+            } else {
+                setUnit(unitsData.find(u => u.id === currentUnit) || null);
+            }
 
         } catch (error) {
             console.error("Error loading professional data:", error);
@@ -337,6 +345,7 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({ currentUnit, pr
                                 professionals={professional ? [professional] : []}
                                 patients={patients}
                                 unit={unit}
+                                units={units}
                                 onEditSession={() => { }} // TODO: Add Edit
                                 onUpdateSession={handleUpdateSession}
                             />
@@ -358,6 +367,7 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({ currentUnit, pr
                                 sessions={calendarSessions}
                                 professionals={professional ? [professional] : []}
                                 patients={patients}
+                                units={units}
                                 onEditSession={() => { }}
                             />
                         ) : viewMode === 'weekList' ? (
@@ -366,6 +376,7 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({ currentUnit, pr
                                 sessions={calendarSessions}
                                 professionals={professional ? [professional] : []}
                                 patients={patients}
+                                units={units}
                                 onEditSession={() => { }}
                             />
                         ) : (
@@ -375,6 +386,7 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({ currentUnit, pr
                                 professionals={professional ? [professional] : []}
                                 patients={patients}
                                 unit={unit}
+                                units={units}
                                 onEditSession={() => { }} // TODO: Add Edit
                                 onDateClick={(date) => {
                                     setSelectedDate(date);

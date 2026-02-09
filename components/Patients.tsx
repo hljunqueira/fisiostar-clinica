@@ -10,20 +10,151 @@ import { storageApi } from '../src/services/storage-api';
 import { revenuesApi } from '../src/services/financial-api';
 import toast from 'react-hot-toast';
 import SignatureModal from './SignatureModal';
+import { useAuth } from '../src/contexts/AuthContext';
 
 // ... (omitted)
 
+// ScheduleSessionModal
+const ScheduleSessionModal = ({ onClose, onSave, patient, professionals, units, currentUnit }: {
+    onClose: () => void,
+    onSave: (session: any) => void,
+    patient: Patient,
+    professionals: Professional[],
+    units: Unit[],
+    currentUnit: UnitId
+}) => {
+    const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [time, setTime] = useState('08:00');
+    const [professionalId, setProfessionalId] = useState('');
+    const [type, setType] = useState('Fisioterapia');
+    const [unitId, setUnitId] = useState(currentUnit === 'ALL' ? (patient.unitId || units[0]?.id) : currentUnit);
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        onSave({
+            date,
+            time,
+            professionalId,
+            type,
+            unitId,
+            patientId: patient.id,
+            status: 'scheduled'
+        });
+    };
+
+    const availableProfessionals = professionals.filter(p => p.unitIds.includes(unitId));
+
+    return (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-md relative z-10 animate-fade-in p-6">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-gray-900">Agendar Sessão</h3>
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {currentUnit === 'ALL' && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Unidade</label>
+                            <select
+                                value={unitId}
+                                onChange={e => setUnitId(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                required
+                            >
+                                {units.map(u => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                            <input
+                                type="date"
+                                required
+                                value={date}
+                                onChange={e => setDate(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Hora</label>
+                            <input
+                                type="time"
+                                required
+                                value={time}
+                                onChange={e => setTime(e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Profissional</label>
+                        <select
+                            required
+                            value={professionalId}
+                            onChange={e => setProfessionalId(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        >
+                            <option value="">Selecione...</option>
+                            {availableProfessionals.map(p => (
+                                <option key={p.id} value={p.id}>{p.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Tipo / Procedimento</label>
+                        <select
+                            value={type}
+                            onChange={e => setType(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        >
+                            <option value="Fisioterapia">Fisioterapia</option>
+                            <option value="Pilates">Pilates</option>
+                            <option value="Avaliação">Avaliação</option>
+                            <option value="Hidroterapia">Hidroterapia</option>
+                        </select>
+                    </div>
+
+                    <div className="pt-4 flex justify-end gap-3">
+                        <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 hover:bg-gray-50 rounded-lg">
+                            Cancelar
+                        </button>
+                        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            Confirmar Agendamento
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+};
+
 // CreatePatientModal
-const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initialData }: { onClose: () => void, onSave: (p: Patient) => void, currentUnit: UnitId, planTemplates: PlanTemplate[], initialData?: Patient | null }) => {
+const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initialData, allUnits }: { onClose: () => void, onSave: (p: Patient) => void, currentUnit: UnitId, planTemplates: PlanTemplate[], initialData?: Patient | null, allUnits: Unit[] }) => {
     // Basic Info
     const [name, setName] = useState(initialData?.name || '');
     const [cpf, setCpf] = useState(initialData?.cpf || '');
     const [birthDate, setBirthDate] = useState(initialData?.birthDate || '');
+    const [selectedUnitId, setSelectedUnitId] = useState(initialData?.unitId || (currentUnit === 'ALL' ? allUnits[0]?.id : currentUnit));
     const [unitName, setUnitName] = useState('');
 
     useEffect(() => {
-        unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('Unidade Desconhecida'));
-    }, [currentUnit]);
+        if (currentUnit === 'ALL') {
+            const u = allUnits.find(u => u.id === selectedUnitId);
+            setUnitName(u?.name || 'Selecione');
+        } else {
+            unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('Unidade Desconhecida'));
+        }
+    }, [currentUnit, selectedUnitId, allUnits]);
 
     // Contact & Address
     const [phone, setPhone] = useState(initialData?.phone || '');
@@ -84,7 +215,9 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
             birthDate,
             address,
             city,
-            unitId: currentUnit,
+            address,
+            city,
+            unitId: selectedUnitId || (currentUnit === 'ALL' ? allUnits[0].id : currentUnit),
             status: initialData?.status || 'Active',
             plan: planData!,
             lastVisit: initialData?.lastVisit,
@@ -107,6 +240,19 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
                         </h2>
                         <p className="text-sm text-gray-500 mt-1">Unidade: <span className="font-semibold">{unitName}</span></p>
                     </div>
+                    {currentUnit === 'ALL' && (
+                        <div className="mb-4">
+                            <select
+                                value={selectedUnitId}
+                                onChange={e => setSelectedUnitId(e.target.value)}
+                                className="px-3 py-1 border border-gray-200 rounded-lg text-sm"
+                            >
+                                {allUnits.map(u => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-white rounded-full transition-all">
                         <X className="w-6 h-6" />
                     </button>
@@ -270,13 +416,24 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
 
 // --- Sub-component: Patient Detail Modal ---
 
-const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { patient: Patient, onClose: () => void, currentUnit: UnitId, professionals: Professional[] }) => {
+const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, units }: { patient: Patient, onClose: () => void, currentUnit: UnitId, professionals: Professional[], units: Unit[] }) => {
     const [unitName, setUnitName] = useState('');
+    const { systemUser } = useAuth();
     useEffect(() => {
-        unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('FisioStar'));
-    }, [currentUnit]);
+        if (currentUnit === 'ALL') {
+            setUnitName(`Todas (Paciente: ${units.find(u => u.id === patient.unitId)?.name || 'N/A'})`);
+        } else {
+            unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('FisioStar'));
+        }
+    }, [currentUnit, patient.unitId, units]);
 
     const [activeTab, setActiveTab] = useState<'info' | 'signatures' | 'financial'>('signatures');
+    // ... items ...
+    const [isScheduling, setIsScheduling] = useState(false);
+    const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+    const [newProfessionalId, setNewProfessionalId] = useState('');
+
+    // ... continue ...
     const [currentPhoto, setCurrentPhoto] = useState(patient.photoUrl);
     const [showCamera, setShowCamera] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -381,7 +538,8 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                         category: 'session',
                         description: `Sessão Avulsa - ${session.type} - ${patient.name}`,
                         amount: session.price,
-                        revenueDate: new Date().toISOString().split('T')[0]
+                        revenueDate: new Date().toISOString().split('T')[0],
+                        createdBy: systemUser?.id
                     });
                     toast.success('Financeiro atualizado com sucesso!');
                 } catch (err) {
@@ -400,23 +558,48 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
             console.error('Error confirming signature:', error);
             toast.error('Erro ao confirmar assinatura');
         }
-    };
+    }
+};
 
-    const handleConfirmPayment = async (imageData: string, type: 'signature' | 'photo') => {
-        // In the future, this would save to patient_plans payment fields
-        toast.success(`Pagamento confirmado via ${type === 'signature' ? 'assinatura' : 'foto'}!`);
-        setShowPaymentSignatureModal(false);
-    };
+const handleScheduleSession = async (sessionData: any) => {
+    try {
+        const newSession = await sessionsApi.create(sessionData);
+        setPatientHistory(prev => [newSession, ...prev].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+        toast.success('Sessão agendada com sucesso!');
+        setIsScheduling(false);
+    } catch (error) {
+        console.error('Error scheduling session:', error);
+        toast.error('Erro ao agendar sessão');
+    }
+};
 
-    const handlePrint = () => {
-        const printWindow = window.open('', '', 'width=900,height=700');
+const handleUpdateProfessional = async (sessionId: string, professionalId: string) => {
+    try {
+        await sessionsApi.update(sessionId, { professionalId });
+        setPatientHistory(prev => prev.map(s => s.id === sessionId ? { ...s, professionalId } : s));
+        toast.success('Profissional da sessão atualizado!');
+        setEditingSessionId(null);
+    } catch (error) {
+        console.error('Error updating professional:', error);
+        toast.error('Erro ao atualizar profissional');
+    }
+};
 
-        if (!printWindow) {
-            toast.error('O bloqueador de pop-ups impediu a impressão. Por favor, permita pop-ups para este site.');
-            return;
-        }
+const handleConfirmPayment = async (imageData: string, type: 'signature' | 'photo') => {
+    // In the future, this would save to patient_plans payment fields
+    toast.success(`Pagamento confirmado via ${type === 'signature' ? 'assinatura' : 'foto'}!`);
+    setShowPaymentSignatureModal(false);
+};
 
-        const htmlContent = `
+const handlePrint = () => {
+    const printWindow = window.open('', '', 'width=900,height=700');
+
+    if (!printWindow) {
+        toast.error('O bloqueador de pop-ups impediu a impressão. Por favor, permita pop-ups para este site.');
+        return;
+    }
+
+    const htmlContent = `
             <!DOCTYPE html>
             <html>
             <head>
@@ -473,11 +656,11 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                     </div>
                     <div class="info-item">
                         <label>Plano Contratado</label>
-                        <span>${patient.plan.name}</span>
+                        <span>${patient.plan?.name || 'N/A'}</span>
                     </div>
                      <div class="info-item">
                         <label>Status do Plano</label>
-                        <span>${patient.plan.remainingSessions} sessões restantes de ${patient.plan.totalSessions}</span>
+                        <span>${patient.plan ? `${patient.plan.remainingSessions} sessões restantes de ${patient.plan.totalSessions}` : 'Sem plano ativo'}</span>
                     </div>
                 </div>
 
@@ -494,17 +677,22 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
                     </thead>
                     <tbody>
                         ${patientHistory.map(session => {
-            const prof = professionals.find(p => p.id === session.professionalId);
-            return `
+        const prof = professionals.find(p => p.id === session.professionalId);
+        return `
                                 <tr>
                                     <td>${new Date(session.date).toLocaleDateString('pt-BR')}</td>
                                     <td>${session.time}</td>
                                     <td>${session.type}</td>
                                     <td>${prof?.name || '-'}</td>
-                                    <td><div class="signature-box"></div></td>
+                                    <td>
+                                        ${session.signatureUrl ?
+                `<img src="${session.signatureUrl}" style="max-height: 25px; max-width: 100px;" alt="Assinado" />` :
+                `<div class="signature-box"></div>`
+            }
+                                    </td>
                                 </tr>
                             `;
-        }).join('')}
+    }).join('')}
                     </tbody>
                 </table>
 
@@ -520,351 +708,413 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals }: { 
             </html>
         `;
 
-        printWindow.document.write(htmlContent);
-        printWindow.document.close();
-    };
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+};
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
+return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden relative z-10 flex flex-col md:flex-row animate-fade-in">
-                <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/50 hover:bg-white rounded-full text-gray-500 hover:text-gray-900 z-20">
-                    <X className="w-5 h-5" />
-                </button>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden relative z-10 flex flex-col md:flex-row animate-fade-in">
+            <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-white/50 hover:bg-white rounded-full text-gray-500 hover:text-gray-900 z-20">
+                <X className="w-5 h-5" />
+            </button>
 
-                {/* Left Sidebar: Photo & Key Info */}
-                <div className="w-full md:w-72 bg-gray-50 border-r border-gray-200 p-6 flex flex-col items-center flex-shrink-0">
-                    <div className="relative group mb-4">
-                        <div className="w-32 h-32 rounded-full overflow-hidden shadow-md border-4 border-white relative bg-white">
-                            {currentPhoto ? (
-                                <img src={currentPhoto} alt={patient.name} className="w-full h-full object-cover" />
-                            ) : (
-                                <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-4xl">
-                                    {patient.name.charAt(0)}
-                                </div>
-                            )}
+            {/* Left Sidebar: Photo & Key Info */}
+            <div className="w-full md:w-72 bg-gray-50 border-r border-gray-200 p-6 flex flex-col items-center flex-shrink-0">
+                <div className="relative group mb-4">
+                    <div className="w-32 h-32 rounded-full overflow-hidden shadow-md border-4 border-white relative bg-white">
+                        {currentPhoto ? (
+                            <img src={currentPhoto} alt={patient.name} className="w-full h-full object-cover" />
+                        ) : (
+                            <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-4xl">
+                                {patient.name.charAt(0)}
+                            </div>
+                        )}
 
-                            {/* File Upload Overlay */}
-                            <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
-                                <UploadCloud className="w-8 h-8 text-white" />
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={async (e) => {
-                                        const file = e.target.files?.[0];
-                                        if (!file) return;
-                                        try {
-                                            const publicUrl = await storageApi.uploadFile('patient-photos', `patient-${patient.id}-${Date.now()}`, file);
-                                            await patientsApi.update(patient.id, { photoUrl: publicUrl });
-                                            setCurrentPhoto(publicUrl);
-                                            toast.success('Foto atualizada!');
-                                        } catch (err) {
-                                            console.error(err);
-                                            toast.error('Erro ao enviar foto');
-                                        }
-                                    }}
-                                />
-                            </label>
-                        </div>
-
-                        <button
-                            onClick={handleStartCamera}
-                            className="absolute bottom-0 right-0 p-2 bg-primary text-white rounded-full hover:bg-primary-hover shadow-lg transition-transform hover:scale-105 z-10"
-                            title="Tirar foto com câmera"
-                        >
-                            <Camera className="w-4 h-4" />
-                        </button>
+                        {/* File Upload Overlay */}
+                        <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
+                            <UploadCloud className="w-8 h-8 text-white" />
+                            <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    try {
+                                        const publicUrl = await storageApi.uploadFile('patient-photos', `patient-${patient.id}-${Date.now()}`, file);
+                                        await patientsApi.update(patient.id, { photoUrl: publicUrl });
+                                        setCurrentPhoto(publicUrl);
+                                        toast.success('Foto atualizada!');
+                                    } catch (err) {
+                                        console.error(err);
+                                        toast.error('Erro ao enviar foto');
+                                    }
+                                }}
+                            />
+                        </label>
                     </div>
 
-                    <h2 className="text-xl font-bold text-center text-gray-900">{patient.name}</h2>
-                    <span className="text-sm text-gray-500 mb-6">{patient.phone}</span>
-
-                    <div className="w-full border-t border-gray-200 pt-4 mt-auto hidden md:block">
-                        <p className="text-xs text-center text-gray-400">Cadastrado em {new Date().toLocaleDateString('pt-BR')}</p>
-                    </div>
+                    <button
+                        onClick={handleStartCamera}
+                        className="absolute bottom-0 right-0 p-2 bg-primary text-white rounded-full hover:bg-primary-hover shadow-lg transition-transform hover:scale-105 z-10"
+                        title="Tirar foto com câmera"
+                    >
+                        <Camera className="w-4 h-4" />
+                    </button>
                 </div>
 
-                {/* Right Content: Tabs */}
-                <div className="flex-1 flex flex-col min-h-0 bg-white">
-                    <div className="border-b border-gray-200">
-                        <nav className="flex px-6" aria-label="Tabs">
-                            <button
-                                onClick={() => setActiveTab('signatures')}
-                                className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'signatures' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <FileSignature className="w-4 h-4" />
-                                Histórico & Assinaturas
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('financial')}
-                                className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'financial' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <CreditCard className="w-4 h-4" />
-                                Financeiro & Plano
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('info')}
-                                className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'info' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                <User className="w-4 h-4" />
-                                Dados Pessoais
-                            </button>
-                        </nav>
-                    </div>
+                <h2 className="text-xl font-bold text-center text-gray-900">{patient.name}</h2>
+                <span className="text-sm text-gray-500 mb-6">{patient.phone}</span>
 
-                    <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
-                        {activeTab === 'signatures' && (
-                            <div className="space-y-6 animate-fade-in">
-                                <div className="flex justify-between items-center bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
-                                    <div>
-                                        <h3 className="font-bold text-gray-900">Ficha de Presença</h3>
-                                        <p className="text-sm text-gray-600">Imprima a ficha para controle físico de assinaturas.</p>
+                <div className="w-full border-t border-gray-200 pt-4 mt-auto hidden md:block">
+                    <p className="text-xs text-center text-gray-400">Cadastrado em {new Date().toLocaleDateString('pt-BR')}</p>
+                </div>
+            </div>
+
+            {/* Right Content: Tabs */}
+            <div className="flex-1 flex flex-col min-h-0 bg-white">
+                <div className="border-b border-gray-200">
+                    <nav className="flex px-6" aria-label="Tabs">
+                        <button
+                            onClick={() => setActiveTab('signatures')}
+                            className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'signatures' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                        >
+                            <FileSignature className="w-4 h-4" />
+                            Histórico & Assinaturas
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('financial')}
+                            className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'financial' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                        >
+                            <CreditCard className="w-4 h-4" />
+                            Financeiro & Plano
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('info')}
+                            className={`py-4 px-4 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors ${activeTab === 'info' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                        >
+                            <User className="w-4 h-4" />
+                            Dados Pessoais
+                        </button>
+                    </nav>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
+                    {activeTab === 'signatures' && (
+                        <div className="space-y-6 animate-fade-in">
+                            <div className="flex justify-between items-center bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
+                                <div>
+                                    <h3 className="font-bold text-gray-900">Ficha de Presença</h3>
+                                    <p className="text-sm text-gray-600">Imprima a ficha para controle físico de assinaturas.</p>
+                                </div>
+                                <button
+                                    onClick={handlePrint}
+                                    className="bg-gray-50 border border-gray-200 text-gray-700 hover:bg-white hover:border-blue-300 hover:text-blue-600 px-4 py-2 rounded-lg font-medium transition-all text-sm flex items-center gap-2"
+                                >
+                                    <Printer className="w-4 h-4" />
+                                    Imprimir
+                                </button>
+                            </div>
+
+                            {isScheduling && (
+                                <ScheduleSessionModal
+                                    onClose={() => setIsScheduling(false)}
+                                    onSave={handleScheduleSession}
+                                    patient={patient}
+                                    professionals={professionals}
+                                    units={units}
+                                    currentUnit={currentUnit}
+                                />
+                            )}
+
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-primary" />
+                                    Histórico de Atendimentos
+                                </h3>
+                                <button
+                                    onClick={() => setIsScheduling(true)}
+                                    className="text-sm bg-primary text-white px-3 py-1.5 rounded-lg hover:bg-primary-hover transition-colors flex items-center gap-2"
+                                >
+                                    <CalendarIcon className="w-4 h-4" />
+                                    Agendar Sessão
+                                </button>
+                            </div>
+
+                            <div>
+                                <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                                    <Clock className="w-4 h-4 text-primary" />
+                                    Histórico de Atendimentos
+                                </h3>
+                                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                                    {patientHistory.length > 0 ? (
+                                        <table className="w-full text-sm text-left">
+                                            <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
+                                                <tr>
+                                                    <th className="px-5 py-3">Data/Hora</th>
+                                                    <th className="px-5 py-3">Procedimento</th>
+                                                    <th className="px-5 py-3">Profissional</th>
+                                                    <th className="px-5 py-3 text-center">Status</th>
+                                                    <th className="px-5 py-3 text-right">Ação</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-100">
+                                                {patientHistory.map(session => {
+                                                    const prof = professionals.find(p => p.id === session.professionalId);
+                                                    return (
+                                                        <tr key={session.id} className="hover:bg-gray-50 transition-colors">
+                                                            <td className="px-5 py-3 font-medium text-gray-900">
+                                                                {new Date(session.date).toLocaleDateString('pt-BR')} <span className="text-gray-400 font-normal ml-1">{session.time}</span>
+                                                            </td>
+                                                            <td className="px-5 py-3 text-gray-600">{session.type}</td>
+                                                            <td className="px-5 py-3 text-gray-600">{session.type}</td>
+                                                            <td className="px-5 py-3 text-gray-600">
+                                                                {editingSessionId === session.id ? (
+                                                                    <div className="flex items-center gap-2">
+                                                                        <select
+                                                                            className="text-xs border rounded p-1"
+                                                                            value={newProfessionalId}
+                                                                            onChange={(e) => setNewProfessionalId(e.target.value)}
+                                                                        >
+                                                                            <option value="">Selecione...</option>
+                                                                            {professionals.map(p => (
+                                                                                <option key={p.id} value={p.id}>{p.name}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                        <button onClick={() => handleUpdateProfessional(session.id, newProfessionalId)} className="text-green-600 hover:text-green-800"><Check className="w-3 h-3" /></button>
+                                                                        <button onClick={() => setEditingSessionId(null)} className="text-red-600 hover:text-red-800"><X className="w-3 h-3" /></button>
+                                                                    </div>
+                                                                ) : (
+                                                                    <div className="flex items-center gap-2 group/prof">
+                                                                        <span>{prof?.name || '-'}</span>
+                                                                        <button
+                                                                            onClick={() => { setEditingSessionId(session.id); setNewProfessionalId(session.professionalId); }}
+                                                                            className="opacity-0 group-hover/prof:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity"
+                                                                            title="Trocar Profissional"
+                                                                        >
+                                                                            <Edit2 className="w-3 h-3" />
+                                                                        </button>
+                                                                    </div>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-center">
+                                                                {session.signed ? (
+                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-100">
+                                                                        <CheckCircle className="w-3 h-3" /> Assinado
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-50 text-orange-700 text-xs font-medium border border-orange-100">
+                                                                        <Clock className="w-3 h-3" /> Pendente
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                            <td className="px-5 py-3 text-right">
+                                                                {!session.signed && (
+                                                                    <button
+                                                                        onClick={() => handleOpenSignatureModal(session.id)}
+                                                                        className="text-primary hover:text-primary-hover font-medium text-xs border border-primary/20 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded transition-all flex items-center gap-1 ml-auto"
+                                                                        title="Assinar digitalmente"
+                                                                    >
+                                                                        <Check className="w-3 h-3" />
+                                                                        Assinar
+                                                                    </button>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                })}
+                                            </tbody>
+                                        </table>
+                                    ) : (
+                                        <div className="p-10 text-center text-gray-400 flex flex-col items-center gap-3">
+                                            <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
+                                                <CalendarIcon className="w-6 h-6 text-gray-300" />
+                                            </div>
+                                            Nenhuma sessão registrada neste histórico.
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'financial' && (
+                        <div className="space-y-6 animate-fade-in">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {/* Plan Details Card */}
+                                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-4 -mt-4 opacity-50"></div>
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 relative z-10">Plano Atual</h3>
+                                    <div className="relative z-10">
+                                        <p className="text-2xl font-bold text-gray-900 mb-1">{patient.plan?.name || 'Nenhum plano ativo'}</p>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`px-2 py-0.5 rounded text-xs font-medium ${patient.plan?.remainingSessions > 0 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>
+                                                {patient.plan ? (patient.plan.remainingSessions > 0 ? 'Ativo' : 'Esgotado') : 'Inativo'}
+                                            </span>
+                                            <span className="text-sm text-gray-500">
+                                                {patient.plan?.expiresAt ? `Expira em: ${new Date(patient.plan.expiresAt).toLocaleDateString('pt-BR')}` : ''}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <button
-                                        onClick={handlePrint}
-                                        className="bg-gray-50 border border-gray-200 text-gray-700 hover:bg-white hover:border-blue-300 hover:text-blue-600 px-4 py-2 rounded-lg font-medium transition-all text-sm flex items-center gap-2"
-                                    >
-                                        <Printer className="w-4 h-4" />
-                                        Imprimir
-                                    </button>
                                 </div>
 
-                                <div>
-                                    <h3 className="font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                        <Clock className="w-4 h-4 text-primary" />
-                                        Histórico de Atendimentos
-                                    </h3>
-                                    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-                                        {patientHistory.length > 0 ? (
-                                            <table className="w-full text-sm text-left">
-                                                <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200">
-                                                    <tr>
-                                                        <th className="px-5 py-3">Data/Hora</th>
-                                                        <th className="px-5 py-3">Procedimento</th>
-                                                        <th className="px-5 py-3">Profissional</th>
-                                                        <th className="px-5 py-3 text-center">Status</th>
-                                                        <th className="px-5 py-3 text-right">Ação</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody className="divide-y divide-gray-100">
-                                                    {patientHistory.map(session => {
-                                                        const prof = professionals.find(p => p.id === session.professionalId);
-                                                        return (
-                                                            <tr key={session.id} className="hover:bg-gray-50 transition-colors">
-                                                                <td className="px-5 py-3 font-medium text-gray-900">
-                                                                    {new Date(session.date).toLocaleDateString('pt-BR')} <span className="text-gray-400 font-normal ml-1">{session.time}</span>
-                                                                </td>
-                                                                <td className="px-5 py-3 text-gray-600">{session.type}</td>
-                                                                <td className="px-5 py-3 text-gray-600">{prof?.name || '-'}</td>
-                                                                <td className="px-5 py-3 text-center">
-                                                                    {session.signed ? (
-                                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-100">
-                                                                            <CheckCircle className="w-3 h-3" /> Assinado
-                                                                        </span>
-                                                                    ) : (
-                                                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-orange-50 text-orange-700 text-xs font-medium border border-orange-100">
-                                                                            <Clock className="w-3 h-3" /> Pendente
-                                                                        </span>
-                                                                    )}
-                                                                </td>
-                                                                <td className="px-5 py-3 text-right">
-                                                                    {!session.signed && (
-                                                                        <button
-                                                                            onClick={() => handleOpenSignatureModal(session.id)}
-                                                                            className="text-primary hover:text-primary-hover font-medium text-xs border border-primary/20 hover:border-primary/50 hover:bg-primary/5 px-3 py-1.5 rounded transition-all flex items-center gap-1 ml-auto"
-                                                                            title="Assinar digitalmente"
-                                                                        >
-                                                                            <Check className="w-3 h-3" />
-                                                                            Assinar
-                                                                        </button>
-                                                                    )}
-                                                                </td>
-                                                            </tr>
-                                                        );
-                                                    })}
-                                                </tbody>
-                                            </table>
+                                {/* Balance Card */}
+                                <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+                                    <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Saldo de Sessões</h3>
+                                    <div className="flex items-end gap-3 mb-2">
+                                        <span className="text-4xl font-bold text-primary">{patient.plan?.remainingSessions || 0}</span>
+                                        <span className="text-gray-400 font-medium mb-1">/ {patient.plan?.totalSessions || 0}</span>
+                                    </div>
+                                    <div className="w-full bg-gray-100 rounded-full h-2">
+                                        <div
+                                            className="bg-primary h-2 rounded-full transition-all duration-500"
+                                            style={{ width: patient.plan ? `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` : '0%' }}
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Payment Actions */}
+                            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                                    <DollarSign className="w-5 h-5 text-green-600" />
+                                    Status do Pagamento
+                                </h3>
+
+                                <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg border border-gray-200">
+                                    <div>
+                                        <p className="font-semibold text-gray-900">Mensalidade Atual</p>
+                                        <p className="text-sm text-gray-500">Valor referente ao pacote de {patient.plan?.name || 'N/A'}</p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {patient.plan ? (
+                                            <>
+                                                <span className={`px-3 py-1 rounded-full text-sm font-bold border ${patient.plan.remainingSessions === patient.plan.totalSessions ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                                                    {patient.plan.remainingSessions === patient.plan.totalSessions ? 'Pendente' : 'Pago Confirmado'}
+                                                </span>
+
+                                                {patient.plan.remainingSessions === patient.plan.totalSessions && (
+                                                    <button
+                                                        onClick={() => setShowPaymentSignatureModal(true)}
+                                                        className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium text-sm shadow-sm transition-colors flex items-center gap-2"
+                                                    >
+                                                        <FileSignature className="w-4 h-4" />
+                                                        Confirmar Pagamento
+                                                    </button>
+                                                )}
+                                            </>
                                         ) : (
-                                            <div className="p-10 text-center text-gray-400 flex flex-col items-center gap-3">
-                                                <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-                                                    <CalendarIcon className="w-6 h-6 text-gray-300" />
-                                                </div>
-                                                Nenhuma sessão registrada neste histórico.
-                                            </div>
+                                            <span className="text-sm text-gray-500 italic">Sem plano ativo</span>
                                         )}
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
+                    )}
 
-                        {activeTab === 'financial' && (
-                            <div className="space-y-6 animate-fade-in">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Plan Details Card */}
-                                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-                                        <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-4 -mt-4 opacity-50"></div>
-                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4 relative z-10">Plano Atual</h3>
-                                        <div className="relative z-10">
-                                            <p className="text-2xl font-bold text-gray-900 mb-1">{patient.plan.name}</p>
-                                            <div className="flex items-center gap-2">
-                                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${patient.plan.remainingSessions > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                                    {patient.plan.remainingSessions > 0 ? 'Ativo' : 'Esgotado'}
-                                                </span>
-                                                <span className="text-sm text-gray-500">Expira em: {new Date(patient.plan.expiresAt).toLocaleDateString('pt-BR')}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Balance Card */}
-                                    <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-                                        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-4">Saldo de Sessões</h3>
-                                        <div className="flex items-end gap-3 mb-2">
-                                            <span className="text-4xl font-bold text-primary">{patient.plan.remainingSessions}</span>
-                                            <span className="text-gray-400 font-medium mb-1">/ {patient.plan.totalSessions}</span>
-                                        </div>
-                                        <div className="w-full bg-gray-100 rounded-full h-2">
-                                            <div
-                                                className="bg-primary h-2 rounded-full transition-all duration-500"
-                                                style={{ width: `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` }}
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Payment Actions */}
-                                <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-                                    <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                                        <DollarSign className="w-5 h-5 text-green-600" />
-                                        Status do Pagamento
+                    {activeTab === 'info' && (
+                        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm animate-fade-in">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
+                                        <User className="w-4 h-4 text-gray-400" />
+                                        Informações Pessoais
                                     </h3>
-
-                                    <div className="flex items-center justify-between bg-gray-50 p-4 rounded-lg border border-gray-200">
-                                        <div>
-                                            <p className="font-semibold text-gray-900">Mensalidade Atual</p>
-                                            <p className="text-sm text-gray-500">Valor referente ao pacote de {patient.plan.name}</p>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <span className={`px-3 py-1 rounded-full text-sm font-bold border ${patient.plan.remainingSessions === patient.plan.totalSessions ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                                                {patient.plan.remainingSessions === patient.plan.totalSessions ? 'Pendente' : 'Pago Confirmado'}
-                                            </span>
-
-                                            {patient.plan.remainingSessions === patient.plan.totalSessions && (
-                                                <button
-                                                    onClick={() => setShowPaymentSignatureModal(true)}
-                                                    className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium text-sm shadow-sm transition-colors flex items-center gap-2"
-                                                >
-                                                    <FileSignature className="w-4 h-4" />
-                                                    Confirmar Pagamento
-                                                </button>
-                                            )}
-                                        </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Nome Completo</label>
+                                        <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.name}</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Telefone</label>
+                                        <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.phone}</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">CPF</label>
+                                        <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.cpf || '-'}</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
+                                        <MapPin className="w-4 h-4 text-gray-400" />
+                                        Endereço
+                                    </h3>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Cidade</label>
+                                        <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.city || '-'}</p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Endereço Completo</label>
+                                        <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.address || '-'}</p>
                                     </div>
                                 </div>
                             </div>
-                        )}
+                        </div>
+                    )}
+                </div>
 
-                        {activeTab === 'info' && (
-                            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm animate-fade-in">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <div className="space-y-4">
-                                        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
-                                            <User className="w-4 h-4 text-gray-400" />
-                                            Informações Pessoais
-                                        </h3>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Nome Completo</label>
-                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.name}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Telefone</label>
-                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.phone}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">CPF</label>
-                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.cpf || '-'}</p>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2 flex items-center gap-2">
-                                            <MapPin className="w-4 h-4 text-gray-400" />
-                                            Endereço
-                                        </h3>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Cidade</label>
-                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.city || '-'}</p>
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Endereço Completo</label>
-                                            <p className="text-gray-900 font-medium bg-gray-50 px-3 py-2 rounded-md border border-gray-100">{patient.address || '-'}</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                {/* Modal Footer */}
+                <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 rounded-b-2xl">
+                    <button onClick={onClose} className="px-5 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors">
+                        Fechar
+                    </button>
+                </div>
+            </div>
+        </div>
 
-                    {/* Modal Footer */}
-                    <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 rounded-b-2xl">
-                        <button onClick={onClose} className="px-5 py-2.5 bg-white border border-gray-300 rounded-lg text-gray-700 font-medium hover:bg-gray-50 transition-colors">
-                            Fechar
+        {/* Camera Overlay Modal */}
+        {showCamera && (
+            <div className="fixed inset-0 z-[60] bg-black bg-opacity-90 flex flex-col items-center justify-center p-4">
+                <div className="relative w-full max-w-md bg-black rounded-xl overflow-hidden shadow-2xl">
+                    <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        onLoadedMetadata={() => videoRef.current?.play()}
+                        className="w-full h-auto bg-gray-900"
+                    />
+                    <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-8">
+                        <button
+                            onClick={handleStopCamera}
+                            className="bg-white/20 hover:bg-white/30 text-white rounded-full p-3 backdrop-blur-sm transition-colors"
+                        >
+                            <X className="w-6 h-6" />
+                        </button>
+                        <button
+                            onClick={handleCapture}
+                            className="bg-white rounded-full p-4 hover:scale-105 transition-transform border-4 border-gray-200"
+                        >
+                            <div className="w-12 h-12 bg-transparent rounded-full border-2 border-black/10" />
                         </button>
                     </div>
                 </div>
+                <p className="text-white mt-4 text-sm font-medium">Ajuste o rosto no quadro e clique no botão central para capturar.</p>
             </div>
+        )}
 
-            {/* Camera Overlay Modal */}
-            {showCamera && (
-                <div className="fixed inset-0 z-[60] bg-black bg-opacity-90 flex flex-col items-center justify-center p-4">
-                    <div className="relative w-full max-w-md bg-black rounded-xl overflow-hidden shadow-2xl">
-                        <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            onLoadedMetadata={() => videoRef.current?.play()}
-                            className="w-full h-auto bg-gray-900"
-                        />
-                        <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-8">
-                            <button
-                                onClick={handleStopCamera}
-                                className="bg-white/20 hover:bg-white/30 text-white rounded-full p-3 backdrop-blur-sm transition-colors"
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
-                            <button
-                                onClick={handleCapture}
-                                className="bg-white rounded-full p-4 hover:scale-105 transition-transform border-4 border-gray-200"
-                            >
-                                <div className="w-12 h-12 bg-transparent rounded-full border-2 border-black/10" />
-                            </button>
-                        </div>
-                    </div>
-                    <p className="text-white mt-4 text-sm font-medium">Ajuste o rosto no quadro e clique no botão central para capturar.</p>
-                </div>
-            )}
+        {/* Session Signature Modal */}
+        {showSignatureModal && (
+            <SignatureModal
+                title="Assinar Sessão"
+                description="Desenhe sua assinatura ou tire uma foto para confirmar a sessão."
+                onConfirm={handleConfirmSignature}
+                onCancel={() => { setShowSignatureModal(false); setSessionToSign(null); }}
+            />
+        )}
 
-            {/* Session Signature Modal */}
-            {showSignatureModal && (
-                <SignatureModal
-                    title="Assinar Sessão"
-                    description="Desenhe sua assinatura ou tire uma foto para confirmar a sessão."
-                    onConfirm={handleConfirmSignature}
-                    onCancel={() => { setShowSignatureModal(false); setSessionToSign(null); }}
-                />
-            )}
-
-            {/* Payment Signature Modal */}
-            {showPaymentSignatureModal && (
-                <SignatureModal
-                    title="Confirmar Pagamento"
-                    description="Desenhe sua assinatura ou tire uma foto para confirmar o pagamento do plano."
-                    onConfirm={handleConfirmPayment}
-                    onCancel={() => setShowPaymentSignatureModal(false)}
-                />
-            )}
-        </div>
-    );
+        {/* Payment Signature Modal */}
+        {showPaymentSignatureModal && (
+            <SignatureModal
+                title="Confirmar Pagamento"
+                description="Desenhe sua assinatura ou tire uma foto para confirmar o pagamento do plano."
+                onConfirm={handleConfirmPayment}
+                onCancel={() => setShowPaymentSignatureModal(false)}
+            />
+        )}
+    </div>
+);
 };
 
 
@@ -890,7 +1140,7 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                 patientsApi.getAll(),
                 planTemplatesApi.getAll(),
                 professionalsApi.getAll(),
-                unitsApi.getById(currentUnit),
+                currentUnit === 'ALL' ? Promise.resolve({ name: 'Todas as Unidades', id: 'ALL' } as Unit) : unitsApi.getById(currentUnit),
                 unitsApi.getAll()
             ]);
             setPatientsList(patientsData);
@@ -913,6 +1163,9 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
         const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (patient.cpf && patient.cpf.includes(searchTerm));
 
+        // Filter by unit if not ALL
+        const matchesUnit = currentUnit === 'ALL' ? true : patient.unitId === currentUnit;
+
         const matchesStatus = statusFilter === 'All'
             ? true
             : patient.status === statusFilter;
@@ -920,10 +1173,10 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
         const matchesPlan = planFilter === 'All'
             ? true
             : planFilter === 'ActivePlan'
-                ? patient.plan.remainingSessions > 0
-                : patient.plan.remainingSessions === 0;
+                ? (patient.plan?.remainingSessions || 0) > 0
+                : (patient.plan?.remainingSessions || 0) === 0;
 
-        return matchesSearch && matchesStatus && matchesPlan;
+        return matchesSearch && matchesStatus && matchesPlan && matchesUnit;
     });
 
     const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
@@ -1064,16 +1317,18 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                             <div className="space-y-3 mb-4">
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-gray-500">Plano</span>
-                                    <span className="font-medium text-gray-900">{patient.plan.name}</span>
+                                    <span className="font-medium text-gray-900">{patient.plan?.name || 'Sem plano'}</span>
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                     <span className="text-gray-500">Sessões</span>
-                                    <span className="font-medium text-gray-900">{patient.plan.remainingSessions} / {patient.plan.totalSessions}</span>
+                                    <span className="font-medium text-gray-900">
+                                        {patient.plan ? `${patient.plan.remainingSessions} / ${patient.plan.totalSessions}` : '-'}
+                                    </span>
                                 </div>
                                 <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
                                     <div
                                         className="bg-blue-600 h-1.5 rounded-full"
-                                        style={{ width: `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` }}
+                                        style={{ width: patient.plan ? `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` : '0%' }}
                                     />
                                 </div>
                             </div>
@@ -1131,6 +1386,7 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                         currentUnit={currentUnit}
                         planTemplates={planTemplates}
                         initialData={editingPatient}
+                        allUnits={allUnits}
                     />
                 )
             }
@@ -1142,6 +1398,7 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                         onClose={() => setSelectedPatient(null)}
                         currentUnit={currentUnit}
                         professionals={professionals}
+                        units={allUnits}
                     />
                 )
             }
