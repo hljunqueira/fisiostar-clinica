@@ -841,6 +841,10 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, unit
                                         Agendar Sessão
                                     </button>
                                 </div>
+                                <p className="text-xs text-gray-500 mt-2 mb-4 bg-blue-50 p-2 rounded border border-blue-100 flex items-center gap-2">
+                                    <span className="font-bold text-blue-600">Dica:</span>
+                                    Para substituir o profissional de uma sessão, clique no ícone de lápis ao lado do nome do profissional na tabela abaixo.
+                                </p>
 
 
                                 <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
@@ -886,7 +890,7 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, unit
                                                                         <span>{prof?.name || '-'}</span>
                                                                         <button
                                                                             onClick={() => { setEditingSessionId(session.id); setNewProfessionalId(session.professionalId); }}
-                                                                            className="opacity-0 group-hover/prof:opacity-100 text-gray-400 hover:text-blue-600 transition-opacity"
+                                                                            className="text-gray-400 hover:text-blue-600 transition-colors"
                                                                             title="Trocar Profissional"
                                                                         >
                                                                             <Edit2 className="w-3 h-3" />
