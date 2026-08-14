@@ -129,7 +129,12 @@ export const unitsApi = {
 
     async getById(id: string): Promise<Unit> {
         const units = await this.getAll();
+        if (id === 'ALL' || !id) {
+            if (units.length > 0) return units[0];
+            throw new Error('Unit not found');
+        }
         const unit = units.find(u => u.id === id);
+        if (!unit && units.length > 0) return units[0];
         if (!unit) throw new Error('Unit not found');
         return unit;
     },

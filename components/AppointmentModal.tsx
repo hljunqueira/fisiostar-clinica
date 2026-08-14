@@ -22,6 +22,8 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
     // State for loaded data
     const [patients, setPatients] = useState<Patient[]>([]);
     const [professionals, setProfessionals] = useState<Professional[]>([]);
+    const [allUnits, setAllUnits] = useState<Unit[]>([]);
+    const [selectedUnitId, setSelectedUnitId] = useState<string>(editingSession?.unitId || (currentUnit === 'ALL' ? '' : currentUnit));
     const [unit, setUnit] = useState<Unit | null>(null);
     const [loading, setLoading] = useState(true);
 
@@ -41,14 +43,22 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
         async function loadData() {
             try {
                 setLoading(true);
-                const [patientsData, professionalsData, unitData] = await Promise.all([
+                const [patientsData, professionalsData, unitsList] = await Promise.all([
                     patientsApi.getAll(),
                     professionalsApi.getAll(),
-                    unitsApi.getById(currentUnit)
+                    unitsApi.getAll()
                 ]);
-                setPatients(patientsData); // Pacientes são globais, podem ser agendados em qualquer unidade
-                setProfessionals(professionalsData.filter(p => p.unitIds.includes(currentUnit)));
-                setUnit(unitData);
+                setPatients(patientsData);
+                setAllUnits(unitsList);
+
+                const activeUnitId = editingSession?.unitId || (currentUnit === 'ALL' ? (unitsList[0]?.id || '') : currentUnit);
+                setSelectedUnitId(activeUnitId);
+
+                const activeUnitObj = unitsList.find(u => u.id === activeUnitId) || unitsList[0] || null;
+                setUnit(activeUnitObj);
+
+                const availablePros = professionalsData.filter(p => !activeUnitId || p.unitIds.includes(activeUnitId) || currentUnit === 'ALL');
+                setProfessionals(availablePros);
             } catch (error) {
                 console.error('Error loading data:', error);
                 toast.error('Erro ao carregar dados');
@@ -57,7 +67,14 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
             }
         }
         loadData();
-    }, [currentUnit]);
+    }, [currentUnit, editingSession]);
+
+    // Update professionals when selectedUnitId changes
+    const handleUnitSelect = (uId: string) => {
+        setSelectedUnitId(uId);
+        const foundUnit = allUnits.find(u => u.id === uId) || null;
+        setUnit(foundUnit);
+    };
 
     // Derived State
     const selectedPatient = patients.find(p => p.id === selectedPatientId);
@@ -85,7 +102,7 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
             id: editingSession?.id || `sess-${Date.now()}`,
             patientId: selectedPatientId,
             professionalId: selectedProfessionalId,
-            unitId: currentUnit,
+            unitId: selectedUnitId || (unit?.id || (currentUnit === 'ALL' ? allUnits[0]?.id : currentUnit)),
             date: date,
             time: time,
             type: type,
@@ -121,11 +138,24 @@ const AppointmentModal: React.FC<AppointmentModalProps> = ({ isOpen, onClose, on
                             <Calendar className="w-6 h-6 text-blue-600" />
                             {isEditMode ? 'Editar Agendamento' : 'Novo Agendamento'}
                         </h2>
-                        <p className="text-sm text-gray-500 mt-1">
-                            Unidade: <span className="font-semibold text-gray-700">{unit?.name}</span>
-                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-sm text-gray-500">Unidade:</span>
+                            {currentUnit === 'ALL' && allUnits.length > 0 ? (
+                                <select
+                                    value={selectedUnitId}
+                                    onChange={(e) => handleUnitSelect(e.target.value)}
+                                    className="px-2 py-1 bg-white border border-gray-200 rounded-lg text-xs font-bold text-gray-800 shadow-xs focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
+                                >
+                                    {allUnits.map(u => (
+                                        <option key={u.id} value={u.id}>{u.name}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <span className="font-semibold text-gray-700 text-sm">{unit?.name || 'FisioStar'}</span>
+                            )}
+                        </div>
                     </div>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-white rounded-full transition-all">
+                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-white rounded-full transition-all cursor-pointer">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
