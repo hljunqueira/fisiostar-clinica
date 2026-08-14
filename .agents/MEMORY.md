@@ -7,26 +7,34 @@ Este documento contém a memória persistente e o mapeamento atualizado do siste
 ## 📌 Contexto Rápido e Diretrizes Invioláveis
 
 - **Domínio de Produção**: `https://fisiostarclinica.com.br`
-- **VPS Host Produção**: `mdr-vps` (IP `23.80.89.116`, SSH com chave `~/.ssh/id_ed25519` ou `~/.ssh/ig-imports-deploy`)
-- **VPS Supabase**: `vps-supabase` (IP `216.22.5.129`, SSH com chave `~/.ssh/vps_supabase`)
+- **Servidor Host Único**: VPS Produção `mdr-vps` (IP `23.80.89.116`, SSH com chave `~/.ssh/id_ed25519` ou `~/.ssh/ig-imports-deploy`)
+- **Arquitetura 100% Unificada**: Tanto o Frontend SPA (React + Nginx) quanto o Backend Supabase (Kong, Auth, Rest, Postgres DB) rodam **exclusivamente na VPS `23.80.89.116`**.
 - **Regras Obrigatórias**:
-  1. **Sem Endereços IP Brutos em Código/Docs**: Utilizar sempre `fisiostarclinica.com.br`, `mdr-vps`, `vps-supabase` ou `localhost`.
+  1. **Sem Endereços IP Brutos em Código/Docs**: Utilizar sempre `fisiostarclinica.com.br`, `mdr-vps` ou `localhost`.
   2. **Regra do Super Admin**: O Super Admin (`super_admin` / `henriquelinharesjunqueira@gmail.com`) NUNCA aparece em listas públicas de usuários ou em relatórios de auditoria.
   3. **Acesso da Secretária**: Secretária (`secretary`) **NÃO** tem acesso à tela de Configurações (`/settings`), apenas a Serviços e Planos (`/settings?tab=plans`), Agenda e Pacientes.
   4. **Sem Dados Fakes / Mocks**: Todos os registros de logs de auditoria e financeiro devem ler e gravar em dados reais no PostgreSQL.
 
 ---
 
-## 🗄️ 1. BANCO DE DADOS (PostgreSQL / Supabase)
+## 🗄️ 1. BANCO DE DADOS & CONTAINERS SUPABASE (VPS `23.80.89.116`)
 
-### 1.1 Schemas e Enums
+### 1.1 Containers FisioStar no Servidor `23.80.89.116`
+- **Frontend SPA**: `fisiostar-frontend` (Porta `3005`)
+- **Supabase Kong API Gateway**: `supabase-kong-fisiostar` (Porta `8020`)
+- **Supabase PostgreSQL DB**: `supabase-db-fisiostar` (Porta `5435` / Interna `5432`)
+- **Supabase Auth GoTrue**: `supabase-auth-fisiostar`
+- **Supabase REST PostgREST**: `supabase-rest-fisiostar`
+- **Supabase Studio**: `supabase-studio-fisiostar` (Porta `8021`)
+
+### 1.2 Schemas e Enums
 - **`user_role`**: `'admin'`, `'secretary'`, `'manager'`, `'financial'`, `'professional'`, `'super_admin'`
 - **`session_status`**: `'Agendada'`, `'Confirmada'`, `'Realizada'`, `'Cancelada'`, `'Falta'`
 - **`patient_status`**: `'Active'`, `'Inactive'`
 - **`announcement_type`**: `'info'`, `'warning'`, `'urgent'`
 - **`target_role`**: `'all'`, `'professional'`, `'secretary'`
 
-### 1.2 Tabelas Principais
+### 1.3 Tabelas Principais
 1. **`units`**: Unidades/filiais da clínica (`id`, `name`, `city`, `has_pool`, `is_active`).
 2. **`unit_operating_hours`**: Horário de funcionamento das unidades.
 3. **`unit_holidays`**: Feriados e datas de fechamento por unidade.
@@ -66,15 +74,15 @@ Este documento contém a memória persistente e o mapeamento atualizado do siste
 
 ## 🚀 4. INFRAESTRUTURA & SCRIPTS DE DEPLOYMENT
 
-### 4.1 Mapeamento em Produção
-- **Domínio Ativo**: `https://fisiostarclinica.com.br`
-- **Servidor Host**: VPS Produção (`mdr-vps` - IP `23.80.89.116`)
-- **Reverse Proxy**: Caddy Master (`/etc/caddy/Caddyfile`) com SSL automático.
+### 4.1 Mapeamento em Produção (VPS Única `23.80.89.116`)
+- **Domínio**: `https://fisiostarclinica.com.br`
+- **Servidor Host**: VPS Produção `mdr-vps` (`23.80.89.116`)
+- **Reverse Proxy**: Caddy Master (`/etc/caddy/Caddyfile`) com TLS automático.
 - **Container Frontend**: Nginx + React SPA (`fisiostar-frontend` na porta `3005`).
-- **Container Backend/DB**: Gateway Supabase Kong (`supabase-kong-fisiostar` na porta `8020`), PostgreSQL (`supabase-db-fisiostar`).
+- **Container Backend**: Gateway Supabase Kong (`supabase-kong-fisiostar` na porta `8020`), PostgreSQL (`supabase-db-fisiostar`).
 
 ### 4.2 Script de Deploy Automático (`deploy-fisiostar.ps1` / `deploy-fisiostar.sh`)
-Para realizar o deploy completo em produção com 1 comando:
+Para realizar o deploy completo na VPS com 1 comando:
 
 ```powershell
 # No PowerShell local:
