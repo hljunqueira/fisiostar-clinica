@@ -328,7 +328,7 @@ export const revenuesApi = {
             .select('*')
             .order('date', { ascending: false });
 
-        if (filters?.unitId) {
+        if (filters?.unitId && filters.unitId !== 'ALL') {
             query = query.eq('unit_id', filters.unitId);
         }
         if (filters?.patientId) {

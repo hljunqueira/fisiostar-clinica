@@ -28,7 +28,9 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     const [filterProf, setFilterProf] = useState<string>(searchParams.get('professionalId') || 'all');
     const [filterSpecialty, setFilterSpecialty] = useState<string>('all');
     const [filterStatus, setFilterStatus] = useState<string>('all');
+    const [filterPatient, setFilterPatient] = useState<string>('');
     const [isSyncing, setIsSyncing] = useState(false);
+    const [, setRefreshColor] = useState(0);
 
     // Data State
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -90,7 +92,9 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
         const isProf = filterProf === 'all' || s.professionalId === filterProf;
         const isSpecialty = filterSpecialty === 'all' || s.type === filterSpecialty;
         const isStatus = filterStatus === 'all' || s.status === filterStatus;
-        return isProf && isSpecialty && isStatus;
+        const patient = patients.find(p => p.id === s.patientId);
+        const isPatientMatch = !filterPatient || (patient?.name.toLowerCase().includes(filterPatient.toLowerCase().trim()));
+        return isProf && isSpecialty && isStatus && isPatientMatch;
     });
 
 
@@ -243,7 +247,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     };
 
     return (
-        <div className="h-[calc(100vh-8rem)] flex flex-col gap-4 animate-fade-in">
+        <div className="min-h-[calc(100vh-6rem)] flex-1 flex flex-col gap-2 animate-fade-in">
             <CalendarHeader
                 viewMode={viewMode}
                 setViewMode={setViewMode}
@@ -256,11 +260,14 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                 setFilterSpecialty={setFilterSpecialty}
                 filterStatus={filterStatus}
                 setFilterStatus={setFilterStatus}
+                filterPatient={filterPatient}
+                setFilterPatient={setFilterPatient}
                 unit={unit}
                 professionals={professionals}
                 onNewAppointment={() => setIsAppointmentModalOpen(true)}
                 onSyncGoogle={handleSyncGoogle}
                 isSyncing={isSyncing}
+                onColorConfigChange={() => setRefreshColor(prev => prev + 1)}
             />
 
             <div className="flex-1 min-h-0">

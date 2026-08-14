@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Session, SessionStatus, Professional, Patient, Unit, WeekDay } from '../../types';
 import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical } from 'lucide-react';
+import { getSavedColorConfig, getColorStyles } from './CalendarColorModal';
 
 interface DayViewProps {
     date: Date;
@@ -42,7 +43,7 @@ const SESSION_COLORS = [
 
 const getColorByProfessional = (professionalId: string, professionals: Professional[]) => {
     const index = professionals.findIndex(p => p.id === professionalId);
-    return SESSION_COLORS[index % SESSION_COLORS.length];
+    return SESSION_COLORS[index >= 0 ? index % SESSION_COLORS.length : 0];
 };
 
 const getStatusOverrideColor = (status: SessionStatus) => {
@@ -56,6 +57,24 @@ const getStatusOverrideColor = (status: SessionStatus) => {
         default:
             return null;
     }
+};
+
+const getDynamicColor = (session: Session, professionals: Professional[]) => {
+    const config = getSavedColorConfig();
+
+    if (config.mode === 'status') {
+        const found = config.statusColors[session.status];
+        if (found) return found;
+    } else if (config.mode === 'specialty') {
+        const found = config.specialtyColors[session.type];
+        if (found) return found;
+    } else if (config.mode === 'professional') {
+        const found = config.professionalColors[session.professionalId];
+        if (found) return found;
+    }
+
+    const statusColor = getStatusOverrideColor(session.status);
+    return statusColor || getColorByProfessional(session.professionalId, professionals);
 };
 
 const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patients, unit, units, onEditSession, onUpdateSession }) => {
@@ -217,9 +236,9 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                 const [sessionHour, sessionMin] = session.time.split(':').map(Number);
                                 const topOffset = (sessionHour - startHour) * 60 + (sessionMin / 60) * 60;
 
-                                // Use status override or professional color
-                                const statusColor = getStatusOverrideColor(session.status);
-                                const color = statusColor || getColorByProfessional(session.professionalId, professionals);
+                                // Use dynamic user-configured color (supports preset and custom HEX)
+                                const colorObj = getDynamicColor(session, professionals);
+                                const colorStyles = getColorStyles(colorObj);
                                 const isDragging = draggingSession?.id === session.id;
 
                                 return (
@@ -229,8 +248,8 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                         onDragStart={(e) => handleDragStart(e, session)}
                                         onDragEnd={handleDragEnd}
                                         onClick={() => onEditSession(session)}
-                                        className={`absolute left-1 right-1 p-2 rounded-sm border-l-[3px] text-xs leading-tight cursor-pointer hover:z-20 hover:shadow-lg hover:scale-[1.02] transition-all overflow-hidden ${color.bg} ${color.border} ${color.text} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                                        style={{ top: `${topOffset}px`, height: '55px' }}
+                                        className={`absolute left-1 right-1 p-2 rounded-sm border-l-[3px] text-xs leading-tight cursor-pointer hover:z-20 hover:shadow-lg hover:scale-[1.02] transition-all overflow-hidden ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                        style={{ top: `${topOffset}px`, height: '55px', ...colorStyles.style }}
                                         title={`${session.time} - ${patient?.name} (${profName}) - Arraste para mover`}
                                     >
                                         <div className="flex justify-between items-start h-full">

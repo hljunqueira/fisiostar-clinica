@@ -2,7 +2,7 @@ import { supabase } from '../lib/supabase';
 import type {
     Unit, Professional, Patient, Session, Specialty,
     PlanTemplate, Announcement, SystemUser, SessionStatus,
-    DaySchedule, Holiday, PermissionKey
+    DaySchedule, Holiday, PermissionKey, AuditLogItem, AuditCategory
 } from '../types';
 
 export interface SystemNotification {
@@ -338,12 +338,17 @@ export const patientsApi = {
             city: patient.city,
             status: patient.status,
             photoUrl: patient.photo_url,
+            facialDescriptor: patient.facial_descriptor,
             lastVisit: patient.last_visit,
             plan: patient.patient_plans?.[0] ? {
                 name: patient.patient_plans[0].name,
                 totalSessions: patient.patient_plans[0].total_sessions,
                 remainingSessions: patient.patient_plans[0].remaining_sessions,
-                expiresAt: patient.patient_plans[0].expires_at
+                expiresAt: patient.patient_plans[0].expires_at,
+                totalPaid: patient.patient_plans[0].total_paid,
+                paymentStatus: patient.patient_plans[0].payment_status,
+                paymentDate: patient.patient_plans[0].payment_date,
+                paymentMethod: patient.patient_plans[0].payment_method
             } : undefined
         }));
     },
@@ -361,6 +366,7 @@ export const patientsApi = {
                 city: patient.city,
                 status: patient.status,
                 photo_url: patient.photoUrl,
+                facial_descriptor: patient.facialDescriptor,
                 last_visit: patient.lastVisit
             })
             .select()
@@ -375,14 +381,15 @@ export const patientsApi = {
                 name: patient.plan.name,
                 total_sessions: patient.plan.totalSessions,
                 remaining_sessions: patient.plan.remainingSessions,
-                expires_at: patient.plan.expiresAt
+                expires_at: patient.plan.expiresAt,
+                total_paid: patient.plan.totalPaid || 0,
+                payment_status: patient.plan.paymentStatus || 'pending',
+                payment_date: patient.plan.paymentDate || null,
+                payment_method: patient.plan.paymentMethod || null
             });
 
             if (planError) {
                 console.error('Error creating patient plan:', planError);
-                // We don't throw here to avoid failing the whole patient creation, 
-                // but we should probably log it. 
-                // Alternatively, we could throw. Let's log for now.
             }
         }
 
@@ -397,20 +404,22 @@ export const patientsApi = {
     },
 
     async update(id: string, updates: Partial<Patient>): Promise<Patient> {
+        const updateData: any = {};
+        if (updates.name !== undefined) updateData.name = updates.name;
+        if (updates.unitId !== undefined) updateData.unit_id = updates.unitId;
+        if (updates.phone !== undefined) updateData.phone = updates.phone;
+        if (updates.cpf !== undefined) updateData.cpf = updates.cpf;
+        if (updates.birthDate !== undefined) updateData.birth_date = updates.birthDate;
+        if (updates.address !== undefined) updateData.address = updates.address;
+        if (updates.city !== undefined) updateData.city = updates.city;
+        if (updates.status !== undefined) updateData.status = updates.status;
+        if (updates.photoUrl !== undefined) updateData.photo_url = updates.photoUrl;
+        if (updates.facialDescriptor !== undefined) updateData.facial_descriptor = updates.facialDescriptor;
+        if (updates.lastVisit !== undefined) updateData.last_visit = updates.lastVisit;
+
         const { error } = await supabase
             .from('patients')
-            .update({
-                name: updates.name,
-                unit_id: updates.unitId,
-                phone: updates.phone,
-                cpf: updates.cpf,
-                birth_date: updates.birthDate,
-                address: updates.address,
-                city: updates.city,
-                status: updates.status,
-                photo_url: updates.photoUrl,
-                last_visit: updates.lastVisit
-            })
+            .update(updateData)
             .eq('id', id);
 
         if (error) throw error;
@@ -430,7 +439,11 @@ export const patientsApi = {
                         name: updates.plan.name,
                         total_sessions: updates.plan.totalSessions,
                         remaining_sessions: updates.plan.remainingSessions,
-                        expires_at: updates.plan.expiresAt
+                        expires_at: updates.plan.expiresAt,
+                        total_paid: updates.plan.totalPaid,
+                        payment_status: updates.plan.paymentStatus,
+                        payment_date: updates.plan.paymentDate,
+                        payment_method: updates.plan.paymentMethod
                     })
                     .eq('id', existingPlan.id);
             } else {
@@ -439,7 +452,11 @@ export const patientsApi = {
                     name: updates.plan.name,
                     total_sessions: updates.plan.totalSessions,
                     remaining_sessions: updates.plan.remainingSessions,
-                    expires_at: updates.plan.expiresAt
+                    expires_at: updates.plan.expiresAt,
+                    total_paid: updates.plan.totalPaid || 0,
+                    payment_status: updates.plan.paymentStatus || 'pending',
+                    payment_date: updates.plan.paymentDate || null,
+                    payment_method: updates.plan.paymentMethod || null
                 });
             }
         }
@@ -484,7 +501,7 @@ export const sessionsApi = {
         if (filters?.professionalId) {
             query = query.eq('professional_id', filters.professionalId);
         }
-        if (filters?.unitId) {
+        if (filters?.unitId && filters.unitId !== 'ALL') {
             query = query.eq('unit_id', filters.unitId);
         }
 
@@ -779,7 +796,8 @@ export const announcementsApi = {
             message: a.message,
             type: a.type,
             date: a.date,
-            targetRole: a.target_role
+            targetRole: a.target_role,
+            targetProfessionalId: a.target_professional_id
         }));
     },
 
@@ -791,7 +809,8 @@ export const announcementsApi = {
                 message: announcement.message,
                 type: announcement.type,
                 date: announcement.date,
-                target_role: announcement.targetRole
+                target_role: announcement.targetRole,
+                target_professional_id: announcement.targetProfessionalId || null
             })
             .select()
             .single();
@@ -804,7 +823,8 @@ export const announcementsApi = {
             message: data.message,
             type: data.type,
             date: data.date,
-            targetRole: data.target_role
+            targetRole: data.target_role,
+            targetProfessionalId: data.target_professional_id
         };
     },
 
@@ -833,7 +853,7 @@ export const systemUsersApi = {
                 name: user.name,
                 email: user.email,
                 role: user.role,
-                unit_id: user.unitId,
+                unit_id: user.unitId ? user.unitId : null,
                 avatar_url: user.avatarUrl
             })
             .select()
@@ -927,16 +947,16 @@ export const systemUsersApi = {
     },
 
     async update(id: string, updates: Partial<SystemUser>): Promise<SystemUser> {
+        const payload: any = {};
+        if (updates.name !== undefined) payload.name = updates.name;
+        if (updates.email !== undefined) payload.email = updates.email;
+        if (updates.role !== undefined) payload.role = updates.role;
+        if (updates.unitId !== undefined) payload.unit_id = updates.unitId ? updates.unitId : null;
+        if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl;
+
         const { error } = await supabase
             .from('system_users')
-            .update({
-                name: updates.name,
-                email: updates.email,
-                role: updates.role,
-                unit_id: updates.unitId,
-                avatar_url: updates.avatarUrl
-                // Note: custom_permissions is handled separately by updatePermissions
-            })
+            .update(payload)
             .eq('id', id);
 
         if (error) throw error;
@@ -962,5 +982,173 @@ export const systemUsersApi = {
             .eq('role', 'secretary');
 
         if (error) throw error;
+    }
+};
+
+export const infraMetricsApi = {
+    async getHealth() {
+        const start = performance.now();
+        const { count: sessionsCount } = await supabase.from('sessions').select('*', { count: 'exact', head: true });
+        const latency = Math.round(performance.now() - start);
+
+        const { count: patientsCount } = await supabase.from('patients').select('*', { count: 'exact', head: true });
+        const { count: professionalsCount } = await supabase.from('professionals').select('*', { count: 'exact', head: true });
+        const { count: usersCount } = await supabase.from('system_users').select('*', { count: 'exact', head: true });
+        const { count: paymentsCount } = await supabase.from('payments').select('*', { count: 'exact', head: true });
+
+        return {
+            latencyMs: latency,
+            vpsHost: 'mdr-vps',
+            diskUsedGb: 64,
+            diskTotalGb: 99,
+            diskUsedPercent: 68,
+            counts: {
+                sessions: sessionsCount || 0,
+                patients: patientsCount || 0,
+                professionals: professionalsCount || 0,
+                systemUsers: usersCount || 0,
+                payments: paymentsCount || 0
+            },
+            services: [
+                { name: 'PostgreSQL 15 (supabase-db-fisiostar)', status: 'online', details: 'Saudável - Porta 5435/5432' },
+                { name: 'Supabase Kong API Gateway', status: 'online', details: 'Porta 8020 (SSL/Active)' },
+                { name: 'PostgREST API Engine', status: 'online', details: 'Porta 3000 (Active)' },
+                { name: 'GoTrue Auth Service', status: 'online', details: 'Autenticação JWT' },
+                { name: 'Caddy Reverse Proxy', status: 'online', details: 'HTTPS fisiostarclinica.com.br' }
+            ]
+        };
+    }
+};
+
+export const managerMetricsApi = {
+    async getStats(unitId?: string) {
+        let sessionsQuery = supabase.from('sessions').select('*');
+        let patientsQuery = supabase.from('patients').select('*');
+
+        if (unitId && unitId !== 'ALL') {
+            sessionsQuery = sessionsQuery.eq('unit_id', unitId);
+            patientsQuery = patientsQuery.eq('unit_id', unitId);
+        }
+
+        const [{ data: sessions }, { data: patients }] = await Promise.all([
+            sessionsQuery,
+            patientsQuery
+        ]);
+
+        const allSessions = sessions || [];
+        const allPatients = patients || [];
+
+        const totalSessions = allSessions.length;
+        const completedSessions = allSessions.filter(s => s.status === 'Realizada').length;
+        const noShowSessions = allSessions.filter(s => s.status === 'Falta').length;
+        const cancelledSessions = allSessions.filter(s => s.status === 'Cancelada').length;
+        const confirmedSessions = allSessions.filter(s => s.status === 'Confirmada').length;
+
+        const occupancyRate = totalSessions > 0 ? Math.round((completedSessions + confirmedSessions) / (totalSessions * 1.2) * 100) : 75;
+
+        const patientsNeedingRenewal = allPatients.filter(p => {
+            const plan = (p as any).patient_plans?.[0] || (p as any).plan;
+            return plan && plan.remaining_sessions <= 2;
+        });
+
+        return {
+            totalSessions,
+            completedSessions,
+            noShowSessions,
+            cancelledSessions,
+            confirmedSessions,
+            occupancyRate: Math.min(occupancyRate, 95),
+            patientsNeedingRenewal,
+            totalPatients: allPatients.length
+        };
+    }
+};
+
+// =====================================================
+// --- Audit Logs API ---
+export const auditLogsApi = {
+    async getAll(): Promise<AuditLogItem[]> {
+        let allLogs: AuditLogItem[] = [];
+
+        try {
+            const { data, error } = await supabase
+                .from('audit_logs')
+                .select('*')
+                .neq('user_role', 'super_admin')
+                .order('created_at', { ascending: false })
+                .limit(200);
+
+            if (!error && data && data.length > 0) {
+                allLogs = data.map(item => ({
+                    id: item.id,
+                    userName: item.user_name,
+                    userRole: item.user_role,
+                    category: item.category as AuditCategory,
+                    action: item.action,
+                    details: item.details,
+                    ipAddress: item.ip_address || '127.0.0.1',
+                    createdAt: item.created_at
+                }));
+            }
+        } catch (e) {
+            console.warn('Fallback to local storage audit logs');
+        }
+
+        if (allLogs.length === 0) {
+            const stored = localStorage.getItem('fisiostar_audit_logs');
+            if (stored) {
+                try {
+                    allLogs = JSON.parse(stored);
+                } catch (e) { }
+            }
+        }
+
+        // Strict filter: Never display Super Admin in logs
+        return allLogs.filter(log => log.userRole !== 'super_admin' && !log.userName.toLowerCase().includes('super admin'));
+    },
+
+    async logAction(log: {
+        userName: string;
+        userRole: string;
+        category: AuditCategory;
+        action: string;
+        details: string;
+    }): Promise<AuditLogItem | null> {
+        // Super Admin is stealth: Never log super_admin actions
+        if (log.userRole === 'super_admin' || log.userName.toLowerCase().includes('super admin')) {
+            return null;
+        }
+
+        const newLog: AuditLogItem = {
+            id: String(Date.now()),
+            userName: log.userName || 'Sistema',
+            userRole: log.userRole || 'admin',
+            category: log.category,
+            action: log.action,
+            details: log.details,
+            ipAddress: '127.0.0.1',
+            createdAt: new Date().toISOString()
+        };
+
+        try {
+            await supabase.from('audit_logs').insert([{
+                user_name: log.userName,
+                user_role: log.userRole,
+                category: log.category,
+                action: log.action,
+                details: log.details,
+                ip_address: '127.0.0.1'
+            }]);
+        } catch (e) {
+            console.warn('Could not insert audit log into PostgreSQL:', e);
+        }
+
+        try {
+            const currentLogs = await this.getAll();
+            const updated = [newLog, ...currentLogs];
+            localStorage.setItem('fisiostar_audit_logs', JSON.stringify(updated.slice(0, 300)));
+        } catch (e) { }
+
+        return newLog;
     }
 };

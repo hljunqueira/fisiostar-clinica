@@ -121,6 +121,10 @@ CREATE TABLE patient_plans (
   total_sessions INTEGER NOT NULL,
   remaining_sessions INTEGER NOT NULL,
   expires_at DATE NOT NULL,
+  total_paid DECIMAL(10, 2) DEFAULT 0,
+  payment_status TEXT DEFAULT 'pending',
+  payment_date TIMESTAMPTZ,
+  payment_method VARCHAR(20),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -138,6 +142,9 @@ CREATE TABLE sessions (
   status session_status DEFAULT 'Agendada',
   notes TEXT,
   signed BOOLEAN DEFAULT false,
+  signature_url TEXT,
+  is_outside_plan BOOLEAN DEFAULT false,
+  price DECIMAL(10, 2),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -266,3 +273,19 @@ CREATE POLICY "Allow authenticated write access" ON system_users FOR ALL TO auth
 
 CREATE POLICY "Allow authenticated read access" ON announcements FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Allow authenticated write access" ON announcements FOR ALL TO authenticated USING (true);
+
+-- Audit Logs
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_name TEXT NOT NULL,
+  user_role TEXT NOT NULL,
+  category TEXT NOT NULL,
+  action TEXT NOT NULL,
+  details TEXT NOT NULL,
+  ip_address TEXT DEFAULT '127.0.0.1',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow authenticated read access" ON audit_logs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated write access" ON audit_logs FOR ALL TO authenticated USING (true);

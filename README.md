@@ -1,181 +1,114 @@
 # FisioStar - Sistema de Gestão de Clínica de Fisioterapia
 
-Sistema completo de gestão para clínicas de fisioterapia com autenticação, agendamento, prontuários e controle de unidades.
+Sistema completo e moderno para gestão de clínicas de fisioterapia com autenticação, agendamento multi-unidade, controle de prontuários com assinatura digital, substituição de profissionais e dashboards financeiros.
+
+---
+
+## 🌐 Produção
+
+- **URL do Sistema**: [https://fisiostarclinica.com.br](https://fisiostarclinica.com.br)
+- **Infraestrutura**: VPS Produção (`mdr-vps`)
+- **Reverse Proxy / SSL**: Caddy Server (HTTPS automático com certificado TLS Let's Encrypt)
+- **Containers Docker em Produção**:
+  - `fisiostar-frontend`: Nginx + SPA React (Porta 3005)
+  - `supabase-kong-fisiostar`: Supabase Gateway API (Porta 8020)
+  - `supabase-studio-fisiostar`: Supabase Dashboard Studio (Porta 8021)
+  - `supabase-db-fisiostar`: PostgreSQL (Porta 5435)
+
+---
 
 ## 🚀 Stack Tecnológica
 
-- **Frontend**: React 18 + TypeScript + Vite
-- **Backend**: Supabase (BaaS - Backend as a Service)
-- **Database**: PostgreSQL (via Supabase)
-- **Autenticação**: Supabase Auth
-- **UI**: Tailwind CSS + Lucide Icons
+- **Frontend**: React 18 + TypeScript + Vite + Tailwind CSS + Lucide Icons + Recharts
+- **Backend**: Supabase Self-Hosted (PostgreSQL 15, GoTrue Auth, PostgREST, Supavisor)
+- **Infraestrutura**: Docker & Docker Compose + Caddy Proxy
 
-## 📋 Pré-requisitos
+---
 
+## 💻 Desenvolvimento Local
+
+### 1. Pré-requisitos
 - Node.js 18+ instalado
-- Conta no Supabase (gratuita)
+- npm ou yarn
 
-## 🔧 Configuração Inicial
-
-### 1. Instalar Dependências
-
+### 2. Instalar Dependências
 ```bash
 npm install
 ```
 
-### 2. Configurar Banco de Dados Supabase
-
-1. Acesse seu projeto Supabase: https://paurrgakxtxbmgnstwbm.supabase.co
-
-2. Vá para **SQL Editor** e execute os seguintes scripts na ordem:
-
-   **a) Schema (criar tabelas):**
-   - Copie todo o conteúdo de `supabase/schema.sql`
-   - Cole no SQL Editor e execute
-
-   **b) Seed Data (dados iniciais):**
-   - Copie todo o conteúdo de `supabase/seed.sql`
-   - Cole no SQL Editor e execute
-
-### 3. Criar Usuários de Teste
-
-No Supabase, vá para **Authentication** → **Users** → **Add User** e crie:
-
-**Admin:**
-  - Email: `admin@fisiostar.com`
-  - Password: `123456`
-
-**Secretária:**
-  - Email: `julia@fisiostar.com`
-  - Password: `123456`
-
-**Profissional:**
-  - Email: `ana.silva@fisiostar.com`
-  - Password: `123456`
-
-### 4. Iniciar o Projeto
-
-```bash
-npm run dev:all
+### 3. Configurar Variáveis de Ambiente (`.env`)
+Crie o arquivo `.env` na raiz do projeto (baseado em `.env.example`):
+```env
+VITE_SUPABASE_URL=https://fisiostarclinica.com.br
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
-O aplicativo estará disponível em: `http://localhost:5173`
+### 4. Iniciar o Servidor Local
+```bash
+npm run dev
+```
+O aplicativo estará disponível em: `http://localhost:3000`
 
-## 👤 Credenciais de Login
+---
 
-Use uma das contas criadas acima para fazer login:
+## 👤 Perfis e Credenciais de Acesso (Demo)
 
-- **Admin**: admin@fisiostar.com / 123456
-- **Secretária**: julia@fisiostar.com / 123456
-- **Profissional**: ana.silva@fisiostar.com / 123456
+- **Administrador**: `admin@fisiostar.com` / `123456`
+- **Secretária**: `julia@fisiostar.com` / `123456`
+- **Profissional**: `ana.silva@fisiostar.com` / `123456`
+
+---
 
 ## 📁 Estrutura do Projeto
 
 ```
 fisiostar-clinica/
-├── components/           # Componentes React da aplicação
+├── components/           # Componentes da interface React
+│   ├── Calendar/        # Visualizações de calendário (Dia, Semana, Mês)
+│   ├── Dashboard.tsx    # Dashboard principal
+│   ├── Financial.tsx    # Gestão e relatórios financeiros
+│   ├── Patients.tsx     # Gestão completa de pacientes e prontuários
+│   ├── Professionals.tsx# Gestão e agenda dos profissionais
+│   ├── Schedule.tsx     # Sistema de agendamento de sessões
+│   └── Units.tsx        # Cadastro de unidades e filiais
 ├── src/
-│   ├── contexts/        # Context API (AuthContext)
-│   ├── lib/            # Configuração do Supabase
-│   └── services/       # API Layer (CRUD operations)
-├── supabase/           # Scripts SQL para banco de dados
-│   ├── schema.sql      # Estrutura das tabelas
-│   └── seed.sql        # Dados iniciais
-├── types.ts            # Definições TypeScript
-├── constants.ts        # Constantes (deprecated - usar DB)
-├── .env               # Variáveis de ambiente (credenciais)
-└── App.tsx           # Componente principal
+│   ├── contexts/        # AuthContext e estado global
+│   ├── lib/            # Cliente do Supabase
+│   └── services/       # Serviços de integração com a API
+├── supabase/           # Scripts SQL e schemas de banco de dados
+├── types.ts            # Tipagens TypeScript
+├── vite.config.ts      # Configuração do Vite (Porta 3000)
+└── .env                # Variáveis de ambiente
 ```
-
-## 🗄️ Estrutura do Banco de Dados
-
-O sistema possui 12 tabelas principais:
-
-- `specialties` - Especialidades oferecidas
-- `units` - Unidades/filiais com horários e feriados
-- `professionals` - Profissionais de saúde
-- `patients` - Pacientes com planos ativos
-- `sessions` - Agendamentos e consultas
-- `plan_templates` - Templates de planos de tratamento
-- `system_users` - Usuários do sistema
-- `announcements` - Avisos e comunicados
-
-## 🔐 Variáveis de Ambiente
-
-O arquivo `.env` já está configurado com as credenciais do seu projeto Supabase:
-
-```env
-VITE_SUPABASE_URL=https://paurrgakxtxbmgnstwbm.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbG...
-```
-
-**⚠️ Importante**: O `.env` está no `.gitignore` e não será commitado.
-
-## 🎯 Funcionalidades
-
-### Por Tipo de Usuário
-
-**Admin:**
-- ✅ Dashboard com estatísticas
-- ✅ Agendamento completo
-- ✅ Gestão de pacientes
-- ✅ Gestão de profissionais
-- ✅ Gestão de unidades
-- ✅ Configurações do sistema
-
-**Secretária:**
-- ✅ Dashboard
-- ✅ Agendamento
-- ✅ Gestão de pacientes
-
-**Profissional:**
-- ✅ Portal exclusivo
-- ✅ Visualização da própria agenda
-- ✅ Assinatura digital de evoluções
-
-## 🛠️ Desenvolvimento
-
-### Comandos Disponíveis
-
-```bash
-npm run dev        # Inicia servidor de desenvolvimento
-npm run dev:all    # Alias para dev (Supabase é BaaS)
-npm run build      # Build para produção
-npm run preview    # Preview do build de produção
-```
-
-### Adicionar Novos Dados
-
-Você pode adicionar dados diretamente:
-1. Via interface do aplicativo (após login)
-2. Via SQL Editor do Supabase
-3. Via funções da API em `src/services/api.ts`
-
-## 📝 Próximos Passos
-
-1. ✅ **Remover `constants.ts`**: Todos os dados agora vêm do banco
-2. 🔄 **Migrar componentes**: Atualizar Dashboard, Schedule, Patients, etc. para usar a API
-3. 🔄 **Implementar Realtime**: Usar Supabase Realtime para atualiz ações automáticas
-4. 🔄 **Upload de Fotos**: Configurar Supabase Storage para fotos de pacientes
-5. 🔄 **Relatórios**: Adicionar geração de relatórios em PDF
-
-## 🐛 Troubleshooting
-
-**Erro ao fazer login:**
-- Verifique se criou os usuários no Supabase Authentication
-- Confirme que os emails correspondem aos da tabela `system_users`
-
-**Erro de conexão com Supabase:**
-- Confirme que o `.env` está configurado corretamente
-- Verifique se as variáveis começam com `VITE_`
-
-**Tabelas vazias:**
-- Execute novamente o `seed.sql` no SQL Editor
-
-## 📧 Suporte
-
-Para questões técnicas, consulte a documentação do Supabase: https://supabase.com/docs
 
 ---
 
-**Desenvolvido com ❤️ para FisioStar**
+## 🎯 Funcionalidades Implementadas
+
+### 🏥 Gestão Clínica & Agendamento
+- **Multi-unidade**: Alternância e visibilidade de horários entre diferentes unidades da clínica.
+- **Substituição de Profissionais**: Permite alterar o profissional designado para uma consulta sem perder o histórico.
+- **Agenda Inteligente**: Visualização em lista, dia, semana e mês com controle de status da sessão (Agendado, Realizado, Cancelado, Falta).
+
+### 📋 Pacientes & Prontuário Digital
+- Cadastro detalhado de pacientes com plano de tratamento.
+- Anamnese, histórico de sessões e evoluções.
+- Modal com **Assinatura Digital** para confirmação do paciente/profissional.
+
+### 📊 Gestão Financeira & Dashboards
+- Relatórios de faturamento por unidade, tratamento e profissional.
+- Métricas em tempo real e gráficos informativos.
+
+---
+
+## 🛠️ Comandos Úteis
+
+```bash
+npm run dev        # Inicia o servidor de desenvolvimento na porta 3000
+npm run build      # Compila a aplicação para produção
+npm run preview    # Visualiza o build de produção localmente
+```
+
+---
+
+**Desenvolvido para FisioStar** 🏥

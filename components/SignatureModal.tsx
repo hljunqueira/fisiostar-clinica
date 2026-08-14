@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { X, Trash2, Camera, Pen, Check } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface SignatureModalProps {
     title: string;
@@ -21,6 +22,38 @@ const SignatureModal: React.FC<SignatureModalProps> = ({ title, description, onC
     // Camera refs
     const videoRef = useRef<HTMLVideoElement>(null);
     const [cameraActive, setCameraActive] = useState(false);
+    const mediaStreamRef = useRef<MediaStream | null>(null);
+
+    // Camera effect
+    useEffect(() => {
+        if (mode === 'photo' && cameraActive) {
+            let active = true;
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
+                .then(stream => {
+                    if (!active) {
+                        stream.getTracks().forEach(t => t.stop());
+                        return;
+                    }
+                    mediaStreamRef.current = stream;
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                    }
+                })
+                .catch(err => {
+                    console.error('Error accessing camera:', err);
+                    setCameraActive(false);
+                    toast.error('Não foi possível acessar a câmera');
+                });
+
+            return () => {
+                active = false;
+                if (mediaStreamRef.current) {
+                    mediaStreamRef.current.getTracks().forEach(t => t.stop());
+                    mediaStreamRef.current = null;
+                }
+            };
+        }
+    }, [mode, cameraActive]);
 
     // Initialize canvas
     useEffect(() => {
@@ -97,33 +130,26 @@ const SignatureModal: React.FC<SignatureModalProps> = ({ title, description, onC
     };
 
     // Camera handlers
-    const startCamera = async () => {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                setCameraActive(true);
-            }
-        } catch (error) {
-            console.error('Error accessing camera:', error);
-            alert('Não foi possível acessar a câmera');
-        }
+    const startCamera = () => {
+        setCameraActive(true);
     };
 
     const stopCamera = () => {
-        if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
-            videoRef.current.srcObject = null;
-            setCameraActive(false);
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
         }
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+        setCameraActive(false);
     };
 
     const capturePhoto = () => {
         if (videoRef.current) {
             const canvas = document.createElement('canvas');
-            canvas.width = videoRef.current.videoWidth;
-            canvas.height = videoRef.current.videoHeight;
+            canvas.width = videoRef.current.videoWidth || 640;
+            canvas.height = videoRef.current.videoHeight || 480;
             const ctx = canvas.getContext('2d');
             if (ctx) {
                 ctx.drawImage(videoRef.current, 0, 0);
@@ -178,7 +204,7 @@ const SignatureModal: React.FC<SignatureModalProps> = ({ title, description, onC
                         Assinatura
                     </button>
                     <button
-                        onClick={() => setMode('photo')}
+                        onClick={() => { setMode('photo'); startCamera(); }}
                         className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'photo' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}
                     >

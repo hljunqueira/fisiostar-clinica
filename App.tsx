@@ -15,9 +15,14 @@ import {
   Check,
   Stethoscope,
   DollarSign,
-  Moon,
-  Sun
+  Megaphone,
+  User,
+  Key,
+  PanelLeftClose,
+  PanelLeftOpen,
+  CreditCard
 } from 'lucide-react';
+import { UserProfileModal } from './components/UserProfileModal';
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const SecretaryDashboard = React.lazy(() => import('./components/SecretaryDashboard'));
@@ -26,36 +31,21 @@ const Patients = React.lazy(() => import('./components/Patients'));
 const Professionals = React.lazy(() => import('./components/Professionals'));
 const Units = React.lazy(() => import('./components/Units'));
 const Settings = React.lazy(() => import('./components/Settings'));
+const SuperAdminDashboard = React.lazy(() => import('./components/SuperAdminDashboard').then(m => ({ default: m.SuperAdminDashboard })));
+const ManagerDashboard = React.lazy(() => import('./components/ManagerDashboard').then(m => ({ default: m.ManagerDashboard })));
 const ProfessionalPortal = React.lazy(() => import('./components/ProfessionalPortal'));
 const Financial = React.lazy(() => import('./components/Financial'));
+const PlansAndServices = React.lazy(() => import('./components/PlansAndServices'));
+const AnnouncementsView = React.lazy(() => import('./components/AnnouncementsView'));
 const Login = React.lazy(() => import('./components/Login'));
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { Toaster, toast } from 'react-hot-toast';
 import { NotificationsPopover } from './components/NotificationsPopover';
 
-import { UnitId, UserRole, RolePermissions, PermissionKey, Announcement, Unit, Notification } from './types';
-import { unitsApi, announcementsApi, notificationsApi } from './src/services/api';
+import { UnitId, UserRole, RolePermissions, PermissionKey, Announcement, Unit, Notification, Professional, DEFAULT_ROLE_PERMISSIONS, getUserEffectivePermissions } from './src/types';
+import { unitsApi, announcementsApi, notificationsApi, professionalsApi } from './src/services/api';
 
-// Default permissions configuration
-const DEFAULT_PERMISSIONS: RolePermissions = {
-  admin: [
-    'view_dashboard',
-    'view_schedule',
-    'manage_patients',
-    'manage_team',
-    'manage_units',
-    'view_financials',
-    'edit_settings'
-  ],
-  secretary: [
-    'view_dashboard',
-    'view_schedule',
-    'manage_patients'
-  ],
-  professional: [
-    'access_professional_portal'
-  ]
-};
+const DEFAULT_PERMISSIONS = DEFAULT_ROLE_PERMISSIONS;
 
 // --- Sidebar Component ---
 const Sidebar = ({
@@ -63,14 +53,18 @@ const Sidebar = ({
   onClose,
   userRole,
   onLogout,
-  permissions
+  permissions,
+  isCollapsed,
+  onToggleCollapse
 }: {
   isOpen: boolean,
   onClose: () => void,
   currentPath: string,
   userRole: UserRole,
   onLogout: () => void,
-  permissions: RolePermissions
+  permissions: RolePermissions,
+  isCollapsed: boolean,
+  onToggleCollapse: () => void
 }) => {
 
   // Link definitions mapped to specific permissions instead of roles
@@ -80,17 +74,32 @@ const Sidebar = ({
     { icon: <LayoutDashboard className="w-5 h-5" />, label: 'Visão Geral', path: '/meu-portal', permission: 'access_professional_portal' },
     { icon: <Calendar className="w-5 h-5" />, label: 'Minha Agenda', path: '/meu-portal/agenda', permission: 'access_professional_portal' },
     { icon: <DollarSign className="w-5 h-5" />, label: 'Financeiro', path: '/meu-portal/financeiro', permission: 'access_professional_portal' },
-    // Admin/Secretary links
+    { icon: <Megaphone className="w-5 h-5" />, label: 'Comunicados', path: '/meu-portal/comunicados', permission: 'access_professional_portal' },
+    // Admin/Secretary/Manager/Financial links
     { icon: <Calendar className="w-5 h-5" />, label: 'Agenda Geral', path: '/agenda', permission: 'view_schedule' },
     { icon: <Users className="w-5 h-5" />, label: 'Pacientes', path: '/pacientes', permission: 'manage_patients' },
-    { icon: <Briefcase className="w-5 h-5" />, label: 'Equipe & Folha', path: '/profissionais', permission: 'manage_team' },
-    { icon: <Building2 className="w-5 h-5" />, label: 'Unidades', path: '/unidades', permission: 'manage_units' },
+    { icon: <Megaphone className="w-5 h-5" />, label: 'Comunicados', path: '/comunicados', permission: 'view_schedule' },
+    { icon: <Briefcase className="w-5 h-5" />, label: 'Equipe', path: '/profissionais', permission: 'manage_team' },
+    { icon: <CreditCard className="w-5 h-5" />, label: 'Serviços e Planos', path: '/servicos-planos', permission: 'manage_plans' },
     { icon: <DollarSign className="w-5 h-5" />, label: 'Financeiro Geral', path: '/financeiro', permission: 'view_financials' },
   ];
 
   // Filter links based on the current user's role permissions
   const userPermissions = permissions[userRole] || [];
-  const allowedLinks = allLinks.filter(link => userPermissions.includes(link.permission));
+  const dashboardPermissions: PermissionKey[] = [
+    'view_dashboard',
+    'view_secretary_dashboard',
+    'view_manager_dashboard',
+    'view_financial_dashboard',
+    'access_professional_portal'
+  ];
+
+  const allowedLinks = allLinks.filter(link => {
+    if (link.path === '/') {
+      return userPermissions.some(p => dashboardPermissions.includes(p));
+    }
+    return userPermissions.includes(link.permission);
+  });
 
   return (
     <>
@@ -102,73 +111,100 @@ const Sidebar = ({
         />
       )}
 
-      <aside className={`fixed md:sticky top-0 left-0 h-screen w-64 bg-surface border-r border-gray-200 shadow-nav z-50 transition-transform duration-300 cubic-bezier(0.4, 0, 0.2, 1) ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} flex flex-col`}>
-        {/* Logo */}
-        <div className="h-20 flex items-center px-6 border-b border-gray-100">
-          <div className="flex items-center gap-3 text-primary font-bold text-xl tracking-tight">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/30">
-              F
-            </div>
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary-hover">FisioStar</span>
+      <aside className={`fixed md:sticky top-0 left-0 h-screen ${isCollapsed ? 'w-16' : 'w-56'} bg-surface border-r border-gray-200 shadow-nav z-50 transition-all duration-300 cubic-bezier(0.4, 0, 0.2, 1) ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} flex flex-col`}>
+        {/* Logo Header */}
+        <div className={`h-16 flex items-center border-b border-gray-100 ${isCollapsed ? 'justify-center px-2' : 'px-3 justify-between'}`}>
+          <div className="flex items-center justify-center flex-1">
+            <img
+              src="/logo.png"
+              alt="FisioStar"
+              className={isCollapsed ? "w-10 h-10 object-contain" : "h-12 max-w-[150px] object-contain mx-auto"}
+            />
           </div>
-          <button className="ml-auto md:hidden text-gray-400 hover:text-gray-600" onClick={onClose}>
-            <X className="w-6 h-6" />
-          </button>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {/* Collapse/Expand Minimizer Button */}
+            <button
+              onClick={onToggleCollapse}
+              className="hidden md:flex p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              title={isCollapsed ? "Expandir Menu Lateral" : "Recolher Menu Lateral"}
+            >
+              {isCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
+            </button>
+            <button className="md:hidden text-gray-400 hover:text-gray-600" onClick={onClose}>
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto custom-scrollbar">
-          <p className="px-4 text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Menu Principal</p>
+        <nav className={`flex-1 ${isCollapsed ? 'px-2 py-4' : 'px-3 py-4'} space-y-1 overflow-y-auto custom-scrollbar`}>
+          {!isCollapsed && (
+            <p className="px-3 text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Menu Principal</p>
+          )}
           {allowedLinks.map(link => (
             <NavLink
               key={link.path}
               to={link.path}
+              title={isCollapsed ? link.label : undefined}
               onClick={() => window.innerWidth < 768 && onClose()}
               className={({ isActive }) =>
-                `group flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 border-l-[3px] ${isActive
+                `group flex items-center ${isCollapsed ? 'justify-center py-2.5 px-0' : 'gap-3 px-3 py-2.5'} rounded-lg text-xs font-medium transition-all duration-200 border-l-[3px] ${isActive
                   ? 'bg-primary/5 text-primary border-primary shadow-sm'
                   : 'text-secondary border-transparent hover:bg-gray-50 hover:text-gray-900'}`
               }
             >
               {link.icon}
-              {link.label}
+              {!isCollapsed && <span className="truncate">{link.label}</span>}
             </NavLink>
           ))}
         </nav>
 
         {/* Footer */}
-        <div className="p-4 border-t border-gray-100 bg-gray-50/50">
+        <div className={`p-2.5 border-t border-gray-100 bg-gray-50/50 ${isCollapsed ? 'flex flex-col items-center gap-1' : ''}`}>
           {(permissions[userRole] || []).includes('edit_settings') && (
             <NavLink
               to="/settings"
+              title={isCollapsed ? "Configurações" : undefined}
               onClick={() => window.innerWidth < 768 && onClose()}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-4 py-3 text-sm font-medium cursor-pointer rounded-lg transition-colors border-l-[3px] ${isActive
+                `flex items-center ${isCollapsed ? 'justify-center py-2 px-0 w-full' : 'gap-3 px-3 py-2'} text-xs font-medium cursor-pointer rounded-lg transition-colors border-l-[3px] ${isActive
                   ? 'bg-white text-primary border-primary shadow-sm'
                   : 'text-secondary border-transparent hover:bg-white hover:text-gray-900 hover:shadow-sm'}`
               }
             >
-              <SettingsIcon className="w-5 h-5" />
-              <span>Configurações</span>
+              <SettingsIcon className="w-4 h-4" />
+              {!isCollapsed && <span>Configurações</span>}
             </NavLink>
           )}
           <div
             onClick={onLogout}
-            className="flex items-center gap-3 px-4 py-3 text-sm font-medium text-secondary hover:text-danger hover:bg-danger/5 cursor-pointer rounded-lg mt-1 transition-all"
+            title={isCollapsed ? "Sair do Sistema" : undefined}
+            className={`flex items-center ${isCollapsed ? 'justify-center py-2 px-0 w-full' : 'gap-3 px-3 py-2'} text-xs font-medium text-secondary hover:text-danger hover:bg-danger/5 cursor-pointer rounded-lg transition-all`}
           >
-            <LogOut className="w-5 h-5" />
-            <span>Sair do Sistema</span>
+            <LogOut className="w-4 h-4" />
+            {!isCollapsed && <span>Sair do Sistema</span>}
           </div>
 
           {/* User Role Badge Display */}
-          <div className="mt-4 px-2">
-            <div className={`text-[10px] font-bold uppercase tracking-wider py-1.5 px-3 rounded-full w-fit ${userRole === 'admin' ? 'bg-purple-100 text-purple-700' :
-              userRole === 'professional' ? 'bg-blue-100 text-blue-700' :
+          {!isCollapsed && (
+            <div className="mt-2 px-1">
+              <div className={`text-[9px] font-bold uppercase tracking-wider py-1 px-2.5 rounded-full w-fit ${
+                userRole === 'admin' || userRole === 'super_admin' ? 'bg-purple-100 text-purple-700' :
+                userRole === 'professional' ? 'bg-blue-100 text-blue-700' :
+                userRole === 'manager' ? 'bg-indigo-100 text-indigo-700' :
+                userRole === 'financial' ? 'bg-emerald-100 text-emerald-700' :
                 'bg-orange-100 text-orange-700'
               }`}>
-              {userRole === 'professional' ? 'Profissional' : userRole === 'admin' ? 'Administrador' : 'Secretaria'}
+                {userRole === 'professional' ? 'Profissional' :
+                 userRole === 'manager' ? 'Gerente Operacional' :
+                 userRole === 'financial' ? 'Financeiro' :
+                 userRole === 'admin' ? 'Administrador' :
+                 userRole === 'super_admin' ? 'Super Admin' :
+                 'Secretária'}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </aside>
     </>
@@ -191,6 +227,8 @@ interface LayoutProps {
   setCurrentUnit: (unit: UnitId) => void;
   userRole: UserRole;
   userName: string;
+  userAvatarUrl?: string;
+  onOpenProfileModal?: () => void;
   onLogout: () => void;
   permissions: RolePermissions;
   units: Unit[];
@@ -207,6 +245,8 @@ const Layout: React.FC<LayoutProps> = ({
   setCurrentUnit,
   userRole,
   userName,
+  userAvatarUrl,
+  onOpenProfileModal,
   onLogout,
   permissions,
   units,
@@ -217,13 +257,26 @@ const Layout: React.FC<LayoutProps> = ({
   setDarkMode
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isUnitMenuOpen, setIsUnitMenuOpen] = useState(false);
+
+  const toggleSidebarCollapse = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('sidebar_collapsed', String(next));
+      return next;
+    });
+  };
+
   const selectedUnit = currentUnit === 'ALL'
     ? { id: 'ALL', name: 'Todas as Unidades', city: 'Visão Geral', isActive: true, specialties: [], hasPool: false } as Unit
     : units.find(u => u.id === currentUnit) || units[0] || { id: '', name: 'Carregando...', city: '', specialties: [], hasPool: false, isActive: false };
   const { pathname } = useLocation();
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="min-h-screen bg-background flex font-sans antialiased text-secondary">
+      {/* Sidebar Navigation */}
       <Sidebar
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -231,116 +284,164 @@ const Layout: React.FC<LayoutProps> = ({
         userRole={userRole}
         onLogout={onLogout}
         permissions={permissions}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={toggleSidebarCollapse}
       />
 
-      <div className="flex-1 flex flex-col min-h-screen transition-all duration-200">
-        {/* Mobile Header */}
-        <div className="bg-white border-b border-gray-200 p-4 flex items-center justify-between md:hidden shadow-sm z-30">
-          <div className="flex items-center gap-2 text-primary font-bold text-lg">
-            <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white text-sm">
-              F
-            </div>
-            <span>FisioStar</span>
-          </div>
-          <button onClick={() => setSidebarOpen(true)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-            <Menu className="w-6 h-6" />
-          </button>
-        </div>
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Top Header */}
+        <header className="h-16 bg-surface border-b border-gray-200/80 px-6 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md bg-white/90">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="md:hidden p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
 
-        {/* Desktop Header & Content Area */}
-        <div className="flex-1 overflow-x-hidden">
-          {/* Top Bar - Unit Selector & User Profile */}
-          <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 px-8 py-4 flex flex-col sm:flex-row gap-4 justify-between items-center sticky top-0 z-20">
-
-            {/* Unit Selector */}
-            <div className="relative group w-full sm:w-auto">
-              <div className="flex items-center gap-3 px-4 py-2.5 bg-gray-50 rounded-xl border border-gray-200 hover:border-primary/50 hover:shadow-sm transition-all cursor-pointer">
-                <div className={`p-2 rounded-lg ${selectedUnit.active ? 'bg-primary/10 text-primary' : 'bg-gray-200 text-gray-500'}`}>
-                  <Building2 className="w-5 h-5" />
-                </div>
-                <div className="flex-1 min-w-[160px]">
-                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">Unidade Atual</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-bold text-gray-900 text-sm truncate">{selectedUnit.name}</p>
-                    <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-primary transition-colors" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Dropdown */}
-              <div className="absolute top-full left-0 w-full sm:w-80 bg-white rounded-xl shadow-xl border border-gray-100 mt-2 p-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-30 transform origin-top scale-95 group-hover:scale-100">
-                <p className="px-3 py-2 text-xs font-bold text-gray-400 uppercase tracking-wider">Selecione uma Unidade</p>
-                <button
-                  onClick={() => setCurrentUnit('ALL')}
-                  className={`w-full text-left px-3 py-3 rounded-lg flex items-center justify-between group/item transition-all ${currentUnit === 'ALL' ? 'bg-primary/5' : 'hover:bg-gray-50'
-                    }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ring-2 ring-white shadow-sm ${currentUnit === 'ALL' ? 'bg-primary' : 'bg-gray-300'}`} />
-                    <div>
-                      <p className={`font-semibold text-sm ${currentUnit === 'ALL' ? 'text-primary' : 'text-gray-700'}`}>
-                        Todas as Unidades
-                      </p>
-                      <p className="text-xs text-gray-500">Visão Geral</p>
-                    </div>
-                  </div>
-                  {currentUnit === 'ALL' && <Check className="w-4 h-4 text-primary" />}
-                </button>
-                <div className="h-px bg-gray-100 my-1 mx-3" />
-                {units.map(unit => (
-                  <button
-                    key={unit.id}
-                    onClick={() => setCurrentUnit(unit.id)}
-                    className={`w-full text-left px-3 py-3 rounded-lg flex items-center justify-between group/item transition-all ${currentUnit === unit.id ? 'bg-primary/5' : 'hover:bg-gray-50'
-                      }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2 h-2 rounded-full ring-2 ring-white shadow-sm ${unit.active ? 'bg-success' : 'bg-gray-300'}`} />
-                      <div>
-                        <p className={`font-semibold text-sm ${currentUnit === unit.id ? 'text-primary' : 'text-gray-700'}`}>
-                          {unit.name}
-                        </p>
-                        <p className="text-xs text-gray-500">{unit.city}</p>
-                      </div>
-                    </div>
-                    {currentUnit === unit.id && <Check className="w-4 h-4 text-primary" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* User Profile */}
-            <div className="flex items-center gap-4 w-full sm:w-auto justify-end">
+            {/* Selector de Unidade */}
+            <div className="relative">
               <button
-                onClick={() => setDarkMode(!darkMode)}
-                className="p-2 text-gray-400 hover:text-gray-600 dark:text-gray-200 dark:hover:text-white transition-colors"
-                title={darkMode ? "Modo Claro" : "Modo Escuro"}
+                onClick={() => setIsUnitMenuOpen(!isUnitMenuOpen)}
+                className="flex items-center gap-3 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors focus:outline-none cursor-pointer"
               >
-                {darkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+                <div className="p-1.5 bg-white rounded border border-gray-200 text-gray-500">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div className="text-left hidden sm:block">
+                  <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Unidade Atual</p>
+                  <p className="text-xs font-bold text-gray-700 flex items-center gap-1">
+                    {selectedUnit.name}
+                    <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${isUnitMenuOpen ? 'rotate-180 text-primary' : ''}`} />
+                  </p>
+                </div>
               </button>
-              <NotificationsPopover
-                notifications={notifications}
-                onMarkAsRead={onMarkNotificationAsRead}
-                onClearAll={onClearNotifications}
-              />
+
+              {/* Transparent backdrop overlay to close dropdown on click outside */}
+              {isUnitMenuOpen && (
+                <div
+                  className="fixed inset-0 z-[55]"
+                  onClick={() => setIsUnitMenuOpen(false)}
+                />
+              )}
+
+              {/* Dropdown de Seleção de Unidade */}
+              {isUnitMenuOpen && (
+                <div className="absolute left-0 top-full mt-2 w-64 bg-white rounded-2xl shadow-2xl border border-gray-200/80 py-2 z-[60] animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="px-4 py-2 border-b border-gray-100 bg-gray-50/50 rounded-t-2xl">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Alternar Unidade</p>
+                  </div>
+                  <div className="p-1">
+                    <button
+                      onClick={() => {
+                        setCurrentUnit('ALL');
+                        setIsUnitMenuOpen(false);
+                      }}
+                      className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 rounded-lg flex items-center justify-between transition-colors ${currentUnit === 'ALL' ? 'bg-primary/5 text-primary font-bold' : 'text-gray-700'}`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-2 h-2 rounded-full ring-2 ring-white shadow-sm ${currentUnit === 'ALL' ? 'bg-primary' : 'bg-gray-300'}`} />
+                        <div>
+                          <p className={`font-semibold text-xs sm:text-sm ${currentUnit === 'ALL' ? 'text-primary' : 'text-gray-700'}`}>
+                            Todas as Unidades
+                          </p>
+                          <p className="text-[10px] text-gray-500">Visão Geral da Rede</p>
+                        </div>
+                      </div>
+                      {currentUnit === 'ALL' && <Check className="w-4 h-4 text-primary" />}
+                    </button>
+                    {units.map(unit => (
+                      <button
+                        key={unit.id}
+                        onClick={() => {
+                          setCurrentUnit(unit.id);
+                          setIsUnitMenuOpen(false);
+                        }}
+                        className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 rounded-lg flex items-center justify-between transition-colors ${currentUnit === unit.id ? 'bg-primary/5 text-primary font-bold' : 'text-gray-700'}`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className={`w-2 h-2 rounded-full ring-2 ring-white shadow-sm ${unit.active ? 'bg-success' : 'bg-gray-300'}`} />
+                          <div>
+                            <p className={`font-semibold text-xs sm:text-sm ${currentUnit === unit.id ? 'text-primary' : 'text-gray-700'}`}>
+                              {unit.name}
+                            </p>
+                            <p className="text-[10px] text-gray-500">{unit.city}</p>
+                          </div>
+                        </div>
+                        {currentUnit === unit.id && <Check className="w-4 h-4 text-primary" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* User Profile Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+              className="flex items-center gap-3 hover:opacity-90 transition-opacity focus:outline-none cursor-pointer"
+            >
               <div className="text-right hidden sm:block">
-                <p className="text-sm font-bold text-gray-900 leading-none mb-1">{userName}</p>
-                <div className="flex items-center gap-1.5 justify-end text-xs text-gray-500">
+                <p className="text-sm font-bold text-gray-900 leading-none mb-1 flex items-center gap-1.5 justify-end">
+                  {userName}
+                  <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180 text-primary' : ''}`} />
+                </p>
+                <div className="flex items-center gap-1.5 justify-end text-xs text-gray-500 font-medium">
                   <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                  Online
+                  {userRole === 'admin' ? 'Administrador' : userRole === 'secretary' ? 'Recepção' : 'Pilates • CREFITO-3/67890-F'}
                 </div>
               </div>
-              <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-primary to-primary-hover flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-primary/20 ring-2 ring-white">
-                {userName.charAt(0)}
-              </div>
-            </div>
-          </header>
+              {userAvatarUrl ? (
+                <img
+                  src={userAvatarUrl}
+                  alt={userName}
+                  className="w-11 h-11 rounded-full object-cover shadow-lg ring-2 ring-white border border-gray-200"
+                />
+              ) : (
+                <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-primary to-primary-hover flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-primary/20 ring-2 ring-white">
+                  {userName.charAt(0)}
+                </div>
+              )}
+            </button>
 
-          {/* Main Content */}
-          <main className="p-8 max-w-[1600px] mx-auto">
-            {children}
-          </main>
-        </div>
+            {/* Transparent backdrop overlay to close dropdown on click outside */}
+            {isProfileMenuOpen && (
+              <div
+                className="fixed inset-0 z-[55]"
+                onClick={() => setIsProfileMenuOpen(false)}
+              />
+            )}
+
+            {/* Profile Dropdown Menu */}
+            {isProfileMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-200/80 py-2 z-[60] animate-in fade-in slide-in-from-top-2 duration-150">
+                <div className="px-4 py-2 border-b border-gray-100 bg-gray-50/50 rounded-t-2xl">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Minha Conta</p>
+                  <p className="text-xs font-bold text-gray-800 truncate">{userName}</p>
+                </div>
+                <div className="p-1">
+                  <button
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                      onOpenProfileModal();
+                    }}
+                    className="w-full px-3 py-2 text-left text-xs sm:text-sm hover:bg-gray-50 rounded-lg flex items-center gap-2.5 text-gray-700 font-semibold transition-colors"
+                  >
+                    <User className="w-4 h-4 text-primary" /> Editar Perfil & Foto
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </header>
+
+        {/* Main Content */}
+        <main className="p-2 lg:p-3 w-full max-w-full flex-1 flex flex-col min-h-0">
+          {children}
+        </main>
       </div>
     </div>
   );
@@ -354,6 +455,17 @@ const AppContent: React.FC = () => {
   const [unitsLoading, setUnitsLoading] = useState(true);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark');
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [currentProfessional, setCurrentProfessional] = useState<Professional | null>(null);
+
+  useEffect(() => {
+    if (role === 'professional' && systemUser?.name) {
+      professionalsApi.getAll().then(profs => {
+        const found = profs.find(p => p.name.trim().toLowerCase() === systemUser.name.trim().toLowerCase());
+        if (found) setCurrentProfessional(found);
+      }).catch(err => console.error('Error fetching professional details:', err));
+    }
+  }, [role, systemUser?.name]);
 
   useEffect(() => {
     if (darkMode) {
@@ -414,16 +526,12 @@ const AppContent: React.FC = () => {
       return DEFAULT_PERMISSIONS;
     }
 
-    // Only use customPermissions if it exists AND has at least one permission
-    // Otherwise, fall back to role defaults to avoid empty permission sets
-    if (Array.isArray(systemUser.customPermissions) && systemUser.customPermissions.length > 0) {
-      return {
-        ...DEFAULT_PERMISSIONS,
-        [role]: systemUser.customPermissions
-      };
-    }
+    const effective = getUserEffectivePermissions(systemUser);
 
-    return DEFAULT_PERMISSIONS;
+    return {
+      ...DEFAULT_PERMISSIONS,
+      [role]: effective
+    };
   }, [systemUser, role]);
 
   // Load units
@@ -433,8 +541,10 @@ const AppContent: React.FC = () => {
         const data = await unitsApi.getAll();
         setUnits(data);
 
-        // Initialize current unit logic
-        if (assignedUnit) {
+        // For Admin or Super Admin, default to 'ALL' (Todas as Unidades)
+        if (role === 'admin' || role === 'super_admin') {
+          setCurrentUnit('ALL');
+        } else if (assignedUnit) {
           const exists = data.some(u => u.id === assignedUnit);
           setCurrentUnit(exists ? assignedUnit : (data[0]?.id || ''));
         } else if (data.length > 0) {
@@ -449,7 +559,7 @@ const AppContent: React.FC = () => {
       }
     }
     loadUnits();
-  }, [assignedUnit]);
+  }, [assignedUnit, role]);
 
   // Load announcements
   useEffect(() => {
@@ -533,6 +643,8 @@ const AppContent: React.FC = () => {
       setCurrentUnit={setCurrentUnit}
       userRole={role}
       userName={systemUser.name}
+      userAvatarUrl={systemUser.avatarUrl}
+      onOpenProfileModal={() => setIsProfileModalOpen(true)}
       onLogout={handleLogout}
       permissions={rolePermissions}
       units={units}
@@ -545,15 +657,21 @@ const AppContent: React.FC = () => {
       <Suspense fallback={<LoadingFallback />}>
         <Routes>
           <Route path="/" element={
-            role === 'secretary'
-              ? <SecretaryDashboard currentUnit={currentUnit} announcements={announcements} />
-              : <Dashboard
-                currentUnit={currentUnit}
-                announcements={announcements}
-                onAddAnnouncement={handleAddAnnouncement}
-                onDeleteAnnouncement={handleDeleteAnnouncement}
-                canManageAnnouncements={role === 'admin'}
-              />
+            role === 'super_admin'
+              ? <SuperAdminDashboard />
+              : hasPermission('view_manager_dashboard') || role === 'manager'
+                ? <ManagerDashboard currentUnit={currentUnit} />
+                : hasPermission('view_financial_dashboard') || role === 'financial'
+                  ? <Financial currentUnit={currentUnit} currentUserId={systemUser?.id || ''} />
+                  : hasPermission('view_secretary_dashboard') || role === 'secretary'
+                    ? <SecretaryDashboard currentUnit={currentUnit} announcements={announcements} />
+                    : <Dashboard
+                      currentUnit={currentUnit}
+                      announcements={announcements}
+                      onAddAnnouncement={handleAddAnnouncement}
+                      onDeleteAnnouncement={handleDeleteAnnouncement}
+                      canManageAnnouncements={role === 'admin' || role === 'super_admin'}
+                    />
           } />
 
           <Route path="/agenda" element={
@@ -576,6 +694,12 @@ const AppContent: React.FC = () => {
               : <Navigate to={getDefaultRoute()} replace />
           } />
 
+          <Route path="/servicos-planos" element={
+            hasPermission('manage_plans')
+              ? <PlansAndServices />
+              : <Navigate to={getDefaultRoute()} replace />
+          } />
+
           <Route path="/financeiro" element={
             hasPermission('view_financials')
               ? <Financial currentUnit={currentUnit} currentUserId={systemUser?.id || ''} />
@@ -589,6 +713,7 @@ const AppContent: React.FC = () => {
                 setCurrentRole={() => { }}
                 rolePermissions={rolePermissions}
                 setRolePermissions={() => { }}
+                currentUserName={systemUser?.name || 'Administrador'}
               />
             ) : <Navigate to={getDefaultRoute()} replace />
           } />
@@ -620,9 +745,38 @@ const AppContent: React.FC = () => {
               />
               : <Navigate to={getDefaultRoute()} replace />
           } />
+          <Route path="/meu-portal/comunicados" element={
+            hasPermission('access_professional_portal')
+              ? <ProfessionalPortal
+                currentUnit={currentUnit}
+                announcements={announcements}
+                defaultTab="announcements"
+              />
+              : <Navigate to={getDefaultRoute()} replace />
+          } />
+          <Route path="/comunicados" element={
+            <AnnouncementsView
+              announcements={announcements}
+              onAddAnnouncement={handleAddAnnouncement}
+              onDeleteAnnouncement={handleDeleteAnnouncement}
+              userRole={role}
+              currentProfessionalId={systemUser?.id}
+            />
+          } />
           <Route path="*" element={<Navigate to={getDefaultRoute()} replace />} />
         </Routes>
       </Suspense>
+
+      {/* User Profile Modal */}
+      {isProfileModalOpen && systemUser && (
+        <UserProfileModal
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          systemUser={systemUser}
+          professional={currentProfessional}
+          onProfileUpdated={() => window.location.reload()}
+        />
+      )}
     </Layout >
   );
 };

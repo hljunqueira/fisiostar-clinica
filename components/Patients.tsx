@@ -1,11 +1,13 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar as CalendarIcon, Hash, Edit2, Trash2, XCircle, DollarSign } from 'lucide-react';
+import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar as CalendarIcon, Hash, Edit2, Trash2, XCircle, DollarSign, Sparkles, LayoutGrid, List, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FacialScanModal } from './FacialScanModal';
+import { ConfirmModal } from './ConfirmModal';
 
 
 import { UnitId, Patient, SessionStatus, PlanTemplate, Professional, Session, Unit } from '../types';
 import { patientsApi, planTemplatesApi, professionalsApi, sessionsApi, unitsApi } from '../src/services/api';
-import { maskPhone, maskCpf, validateCpf } from '../src/utils/masks';
+import { maskPhone, maskCpf, maskCep, validateCpf } from '../src/utils/masks';
 import { storageApi } from '../src/services/storage-api';
 import { revenuesApi } from '../src/services/financial-api';
 import toast from 'react-hot-toast';
@@ -38,7 +40,7 @@ const ScheduleSessionModal = ({ onClose, onSave, patient, professionals, units, 
             type,
             unitId,
             patientId: patient.id,
-            status: 'scheduled'
+            status: 'Agendada'
         });
     };
 
@@ -157,9 +159,71 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
     }, [currentUnit, selectedUnitId, allUnits]);
 
     // Contact & Address
+    const [cep, setCep] = useState(initialData?.cep || '');
     const [phone, setPhone] = useState(initialData?.phone || '');
     const [city, setCity] = useState(initialData?.city || '');
-    const [address, setAddress] = useState(initialData?.address || '');
+    const [street, setStreet] = useState(initialData?.street || '');
+    const [number, setNumber] = useState(initialData?.number || '');
+    const [bairro, setBairro] = useState(initialData?.bairro || '');
+    const [complement, setComplement] = useState(initialData?.complement || '');
+    const [isFetchingCep, setIsFetchingCep] = useState(false);
+    
+    // CEP Control States:
+    // isCepFetched: true after successfully querying ViaCEP
+    // isGeneralCep: true if CEP is city-wide (no logradouro)
+    // isManualUnlocked: true if user clicks "Digitar Sem CEP" or edits record without CEP
+    const [isCepFetched, setIsCepFetched] = useState(!!initialData?.street || !!initialData?.city);
+    const [isGeneralCep, setIsGeneralCep] = useState(false);
+    const [isManualUnlocked, setIsManualUnlocked] = useState(!!initialData && !initialData.cep);
+    const numberInputRef = useRef<HTMLInputElement>(null);
+
+    const handleCepChange = async (val: string) => {
+        const masked = maskCep(val);
+        setCep(masked);
+        const cleanCep = masked.replace(/\D/g, '');
+
+        if (cleanCep.length === 8) {
+            setIsFetchingCep(true);
+            try {
+                const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+                const data = await res.json();
+                if (!data.erro) {
+                    setIsCepFetched(true);
+                    if (data.localidade && data.uf) {
+                        setCity(`${data.localidade} - ${data.uf}`);
+                    }
+                    if (data.logradouro) {
+                        setStreet(data.logradouro);
+                        setIsGeneralCep(false);
+                        setTimeout(() => numberInputRef.current?.focus(), 150);
+                        toast.success('Rua localizada! Digite apenas o Número.');
+                    } else {
+                        // CEP Único da Cidade
+                        setStreet('');
+                        setIsGeneralCep(true);
+                        toast.success('CEP Geral da Cidade! Preencha a Rua e Bairro.');
+                    }
+                    if (data.bairro) {
+                        setBairro(data.bairro);
+                    } else {
+                        setBairro('');
+                    }
+                } else {
+                    toast.error('CEP não encontrado');
+                    setIsCepFetched(false);
+                    setIsGeneralCep(false);
+                }
+            } catch (err) {
+                console.error('Erro ao buscar CEP:', err);
+                setIsCepFetched(false);
+            } finally {
+                setIsFetchingCep(false);
+            }
+        } else if (cleanCep.length < 8) {
+            setIsCepFetched(false);
+            setIsGeneralCep(false);
+        }
+    };
 
     // Treatment - find matching plan template by name if editing, roughly
     const [selectedPlanId, setSelectedPlanId] = useState(() => {
@@ -207,13 +271,25 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
             }
         }
 
+        const formattedAddress = [
+            street,
+            number ? `nº ${number}` : '',
+            bairro ? `Bairro ${bairro}` : '',
+            complement
+        ].filter(Boolean).join(', ');
+
         const patientData: Patient = {
             id: initialData?.id || `p-${Date.now()}`,
             name,
             phone: phone || '(00) 00000-0000',
             cpf,
             birthDate,
-            address,
+            cep,
+            street,
+            number,
+            bairro,
+            complement,
+            address: formattedAddress || initialData?.address,
             city,
 
             unitId: selectedUnitId || (currentUnit === 'ALL' ? allUnits[0].id : currentUnit),
@@ -227,79 +303,82 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
     };
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={onClose} />
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6 md:p-8">
+            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl relative z-10 animate-fade-in flex flex-col max-h-[90vh] overflow-hidden">
-                <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gray-50/50">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl relative z-10 animate-fade-in flex flex-col max-h-[90vh] overflow-hidden border border-gray-100">
+                {/* Header */}
+                <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-gray-50 via-white to-blue-50/20">
                     <div>
-                        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-                            <UserPlus className="w-6 h-6 text-blue-600" />
+                        <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2.5">
+                            <UserPlus className="w-7 h-7 text-blue-600" />
                             {initialData ? 'Editar Paciente' : 'Novo Prontuário'}
                         </h2>
-                        <p className="text-sm text-gray-500 mt-1">Unidade: <span className="font-semibold">{unitName}</span></p>
+                        <p className="text-xs text-gray-500 mt-1 flex items-center gap-2">
+                            Unidade Responsável: <span className="font-semibold text-gray-800 bg-blue-50 text-blue-700 px-2 py-0.5 rounded-md border border-blue-100">{unitName}</span>
+                        </p>
                     </div>
-                    {currentUnit === 'ALL' && (
-                        <div className="mb-4">
+                    <div className="flex items-center gap-3">
+                        {currentUnit === 'ALL' && (
                             <select
                                 value={selectedUnitId}
                                 onChange={e => setSelectedUnitId(e.target.value)}
-                                className="px-3 py-1 border border-gray-200 rounded-lg text-sm"
+                                className="px-3.5 py-1.5 border border-gray-200 rounded-xl text-xs font-semibold bg-white text-gray-700 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none"
                             >
                                 {allUnits.map(u => (
                                     <option key={u.id} value={u.id}>{u.name}</option>
                                 ))}
                             </select>
-                        </div>
-                    )}
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-white rounded-full transition-all">
-                        <X className="w-6 h-6" />
-                    </button>
+                        )}
+                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-2 hover:bg-gray-100 rounded-full transition-all">
+                            <X className="w-6 h-6" />
+                        </button>
+                    </div>
                 </div>
 
-                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
+                <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">
                     {/* Section 1: Dados Pessoais */}
                     <div>
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-5 border-b border-gray-100 pb-2 flex items-center gap-2">
                             <User className="w-4 h-4 text-blue-600" />
                             Dados Pessoais
                         </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Nome Completo</label>
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+                            <div className="md:col-span-6">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Nome Completo *</label>
                                 <input
                                     type="text"
                                     required
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                    className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400 font-medium text-sm transition-all shadow-sm"
                                     placeholder="Ex: João da Silva"
                                     value={name}
                                     onChange={e => setName(e.target.value)}
                                 />
                             </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">CPF</label>
+                            <div className="md:col-span-3">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">CPF</label>
                                 <div className="relative">
-                                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <Hash className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     <input
                                         type="text"
                                         maxLength={14}
-                                        className={`w-full pl-10 pr-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400 ${cpf && !validateCpf(cpf) ? 'border-red-500 focus:ring-red-500' : 'border-gray-200'}`}
+                                        className={`w-full pl-10 pr-4 py-2.5 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400 font-medium text-sm transition-all shadow-sm ${cpf && !validateCpf(cpf) ? 'border-red-500 focus:ring-red-500' : 'border-gray-200'}`}
                                         placeholder="000.000.000-00"
                                         value={cpf}
                                         onChange={e => setCpf(maskCpf(e.target.value))}
                                     />
                                     {cpf && !validateCpf(cpf) && (
-                                        <span className="text-xs text-red-500 absolute -bottom-4 left-0">CPF inválido</span>
+                                        <span className="text-[11px] font-semibold text-red-500 absolute -bottom-4 left-0">CPF inválido</span>
                                     )}
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Data de Nascimento</label>
+                            <div className="md:col-span-3">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Data de Nascimento</label>
                                 <div className="relative">
-                                    <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <CalendarIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     <input
                                         type="date"
-                                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 font-medium text-sm transition-all shadow-sm"
                                         value={birthDate}
                                         onChange={e => setBirthDate(e.target.value)}
                                     />
@@ -310,44 +389,140 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
 
                     {/* Section 2: Contato e Endereço */}
                     <div>
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
-                            <MapPin className="w-4 h-4 text-blue-600" />
-                            Contato e Endereço
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Telefone</label>
+                        <div className="flex items-center justify-between mb-5 border-b border-gray-100 pb-2">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                <MapPin className="w-4 h-4 text-blue-600" />
+                                Contato e Localização
+                            </h3>
+                            {!isManualUnlocked ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setIsManualUnlocked(true)}
+                                    className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 transition-colors"
+                                    title="Clique para liberar a digitação manual de todo o endereço sem consultar CEP"
+                                >
+                                    <span>🔓 Digitar Endereço Sem CEP</span>
+                                </button>
+                            ) : (
+                                <span className="text-[11px] font-semibold text-amber-600 flex items-center gap-1">
+                                    <span>✍️ Digitação Manual Liberada</span>
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+                            {/* Linha 1: Telefone, CEP, Cidade */}
+                            <div className="md:col-span-4">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Telefone / WhatsApp *</label>
                                 <div className="relative">
-                                    <PhoneIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <PhoneIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                                     <input
                                         type="text"
                                         required
                                         maxLength={15}
-                                        className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
+                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400 font-medium text-sm transition-all shadow-sm"
                                         placeholder="(00) 90000-0000"
                                         value={phone}
                                         onChange={e => setPhone(maskPhone(e.target.value))}
                                     />
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Cidade</label>
+
+                            <div className="md:col-span-3">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                                    <span>CEP</span>
+                                    {isFetchingCep && <span className="text-[10px] text-blue-600 animate-pulse font-semibold">Buscando...</span>}
+                                </label>
+                                <div className="relative">
+                                    <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                    <input
+                                        type="text"
+                                        maxLength={9}
+                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900 placeholder:text-gray-400 font-medium text-sm transition-all shadow-sm"
+                                        placeholder="00000-000"
+                                        value={cep}
+                                        onChange={e => handleCepChange(e.target.value)}
+                                    />
+                                    {isFetchingCep && (
+                                        <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
+                                            <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="md:col-span-5">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Cidade e UF</label>
                                 <input
                                     type="text"
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                    placeholder="Ex: Araranguá"
+                                    disabled={!isManualUnlocked && !isGeneralCep}
+                                    className={`w-full px-4 py-2.5 border rounded-xl outline-none font-medium text-sm transition-all shadow-sm ${!isManualUnlocked && !isGeneralCep ? 'bg-gray-100/90 text-gray-700 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-900 border-gray-200 focus:ring-2 focus:ring-blue-500'}`}
+                                    placeholder={!isManualUnlocked && !isCepFetched ? "Digite o CEP para buscar..." : "Ex: Araranguá - SC"}
                                     value={city}
                                     onChange={e => setCity(e.target.value)}
                                 />
                             </div>
-                            <div className="md:col-span-2">
-                                <label className="block text-sm font-semibold text-gray-700 mb-1.5">Endereço Completo</label>
+
+                            {/* Linha 2: Rua, Número, Bairro */}
+                            <div className="md:col-span-6">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                                    <span>Logradouro / Rua</span>
+                                    {!isManualUnlocked && !isCepFetched && <span className="text-[10px] text-amber-600 font-semibold">🔒 Digite o CEP</span>}
+                                    {!isManualUnlocked && isCepFetched && !isGeneralCep && <span className="text-[10px] text-emerald-600 font-semibold">✓ Bloqueado pelo CEP</span>}
+                                    {!isManualUnlocked && isGeneralCep && <span className="text-[10px] text-blue-600 font-semibold">CEP Único - Digite a Rua</span>}
+                                </label>
                                 <input
                                     type="text"
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-gray-900"
-                                    placeholder="Rua, Número, Bairro"
-                                    value={address}
-                                    onChange={e => setAddress(e.target.value)}
+                                    disabled={!isManualUnlocked && (!isCepFetched || !isGeneralCep)}
+                                    className={`w-full px-4 py-2.5 border rounded-xl outline-none font-medium text-sm transition-all shadow-sm ${!isManualUnlocked && (!isCepFetched || !isGeneralCep) ? 'bg-gray-100/90 text-gray-700 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-900 border-gray-200 focus:ring-2 focus:ring-blue-500'}`}
+                                    placeholder={!isManualUnlocked && !isCepFetched ? "Digite o CEP para liberar..." : "Rua / Avenida"}
+                                    value={street}
+                                    onChange={e => setStreet(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="md:col-span-2">
+                                <label className="block text-xs font-bold text-blue-700 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                                    <span>Número *</span>
+                                    {!isManualUnlocked && !isCepFetched && <span className="text-[10px] text-amber-600 font-semibold">🔒 Bloqueado</span>}
+                                </label>
+                                <input
+                                    ref={numberInputRef}
+                                    type="text"
+                                    disabled={!isManualUnlocked && !isCepFetched}
+                                    className={`w-full px-4 py-2.5 border rounded-xl outline-none font-bold text-sm transition-all shadow-sm ${!isManualUnlocked && !isCepFetched ? 'bg-gray-100/90 text-gray-400 border-gray-200 cursor-not-allowed' : (isCepFetched && !number ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/20 text-gray-900' : 'border-gray-200 bg-white text-gray-900 focus:ring-2 focus:ring-blue-500')}`}
+                                    placeholder="Nº"
+                                    value={number}
+                                    onChange={e => setNumber(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="md:col-span-4">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                                    <span>Bairro</span>
+                                    {!isManualUnlocked && !isCepFetched && <span className="text-[10px] text-amber-600 font-semibold">🔒 Digite o CEP</span>}
+                                    {!isManualUnlocked && isCepFetched && !isGeneralCep && <span className="text-[10px] text-emerald-600 font-semibold">✓ Auto-preenchido</span>}
+                                </label>
+                                <input
+                                    type="text"
+                                    disabled={!isManualUnlocked && (!isCepFetched || !isGeneralCep)}
+                                    className={`w-full px-4 py-2.5 border rounded-xl outline-none font-medium text-sm transition-all shadow-sm ${!isManualUnlocked && (!isCepFetched || !isGeneralCep) ? 'bg-gray-100/90 text-gray-700 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-900 border-gray-200 focus:ring-2 focus:ring-blue-500'}`}
+                                    placeholder={!isManualUnlocked && !isCepFetched ? "Digite o CEP..." : "Bairro"}
+                                    value={bairro}
+                                    onChange={e => setBairro(e.target.value)}
+                                />
+                            </div>
+
+                            {/* Linha 3: Complemento */}
+                            <div className="md:col-span-12">
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Complemento / Ponto de Referência <span className="font-normal text-gray-400 text-[11px]">(Opcional)</span></label>
+                                <input
+                                    type="text"
+                                    disabled={!isManualUnlocked && !isCepFetched}
+                                    className={`w-full px-4 py-2.5 border rounded-xl outline-none font-medium text-sm transition-all shadow-sm ${!isManualUnlocked && !isCepFetched ? 'bg-gray-100/90 text-gray-400 border-gray-200 cursor-not-allowed' : 'bg-white text-gray-900 border-gray-200 focus:ring-2 focus:ring-blue-500'}`}
+                                    placeholder="Ex: Apto 302, Bloco B / Próximo ao Mercado"
+                                    value={complement}
+                                    onChange={e => setComplement(e.target.value)}
                                 />
                             </div>
                         </div>
@@ -355,19 +530,19 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
 
                     {/* Section 3: Plano */}
                     <div>
-                        <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
+                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
                             <FileText className="w-4 h-4 text-blue-600" />
                             Plano de Tratamento
                         </h3>
 
-                        <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                            <div className="mb-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Selecione o Plano ou Modalidade</label>
+                        <div className="bg-blue-50/40 p-5 md:p-6 rounded-2xl border border-blue-100/80">
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">Selecione o Plano ou Modalidade *</label>
                                 <div className="relative">
                                     <select
                                         value={selectedPlanId}
                                         onChange={e => setSelectedPlanId(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none appearance-none bg-white font-medium text-gray-700"
+                                        className="w-full pl-11 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none appearance-none bg-white font-semibold text-sm text-gray-800 shadow-sm"
                                         required
                                     >
                                         <option value="">Selecione...</option>
@@ -378,7 +553,7 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
                                             ))}
                                         </optgroup>
                                     </select>
-                                    <div className="absolute left-3 top-3 text-gray-400 pointer-events-none">
+                                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
                                         <Hash className="w-4 h-4" />
                                     </div>
                                 </div>
@@ -391,18 +566,18 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
                 </form>
 
                 {/* Footer */}
-                <div className="p-6 pt-0 flex justify-end gap-3 bg-white sticky bottom-0">
+                <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 sticky bottom-0">
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+                        className="px-6 py-2.5 bg-white border border-gray-200 text-gray-700 font-bold text-xs uppercase tracking-wider rounded-xl hover:bg-gray-100 transition-all shadow-sm"
                     >
                         Cancelar
                     </button>
                     <button
                         type="submit"
                         onClick={handleSubmit}
-                        className="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
+                        className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg shadow-blue-600/20 transition-all flex items-center gap-2"
                     >
                         <Save className="w-4 h-4" />
                         Salvar Prontuário
@@ -413,9 +588,41 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
     );
 };
 
+const getWhatsappUrl = (phone?: string) => {
+    if (!phone) return '#';
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!cleanPhone) return '#';
+    const finalPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+    return `https://wa.me/${finalPhone}?text=${encodeURIComponent('Olá! Entro em contato da clínica FisioStar.')}`;
+};
+
 // --- Sub-component: Patient Detail Modal ---
 
-const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, units }: { patient: Patient, onClose: () => void, currentUnit: UnitId, professionals: Professional[], units: Unit[] }) => {
+const PatientDetailModal = ({
+    patient,
+    onClose,
+    currentUnit,
+    professionals,
+    units,
+    onOpenFacialScan,
+    onEdit,
+    onToggleStatus,
+    onDelete,
+    onUpdatePatient,
+    onRequestConfirm
+}: {
+    patient: Patient,
+    onClose: () => void,
+    currentUnit: UnitId,
+    professionals: Professional[],
+    units: Unit[],
+    onOpenFacialScan?: (patient: Patient) => void,
+    onEdit?: (patient: Patient) => void,
+    onToggleStatus?: (patient: Patient) => void,
+    onDelete?: (id: string) => void,
+    onUpdatePatient?: (updated: Partial<Patient> & { id: string }) => void,
+    onRequestConfirm?: (config: { title: string; description: string; confirmLabel?: string; variant?: 'danger' | 'warning' | 'info'; onConfirm: () => void }) => void
+}) => {
     const [unitName, setUnitName] = useState('');
     const { systemUser } = useAuth();
     useEffect(() => {
@@ -494,7 +701,9 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, unit
                         const publicUrl = await storageApi.uploadBase64('patient-photos', fileName, dataUrl);
                         await patientsApi.update(patient.id, { photoUrl: publicUrl });
                         setCurrentPhoto(publicUrl);
-                        toast.success('Foto capturada e salva!');
+                        patient.photoUrl = publicUrl;
+                        if (onUpdatePatient) onUpdatePatient({ id: patient.id, photoUrl: publicUrl });
+                        toast.success('Foto capturada e salva com sucesso!');
                     } catch (error) {
                         console.error('Error uploading photo:', error);
                         toast.error('Erro ao salvar foto');
@@ -503,6 +712,33 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, unit
 
                 handleStopCamera();
             }
+        }
+    };
+
+    const handleDeletePhoto = () => {
+        const executeDelete = async () => {
+            try {
+                await patientsApi.update(patient.id, { photoUrl: '' });
+                setCurrentPhoto(undefined);
+                patient.photoUrl = undefined;
+                if (onUpdatePatient) onUpdatePatient({ id: patient.id, photoUrl: undefined });
+                toast.success('Foto de perfil removida com sucesso!');
+            } catch (err) {
+                console.error(err);
+                toast.error('Erro ao remover foto de perfil');
+            }
+        };
+
+        if (onRequestConfirm) {
+            onRequestConfirm({
+                title: 'Remover Foto de Perfil',
+                description: 'Tem certeza que deseja remover a foto de perfil deste paciente?',
+                confirmLabel: 'Remover Foto',
+                variant: 'danger',
+                onConfirm: executeDelete
+            });
+        } else {
+            executeDelete();
         }
     };
 
@@ -745,6 +981,8 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, unit
                                             const publicUrl = await storageApi.uploadFile('patient-photos', `patient-${patient.id}-${Date.now()}`, file);
                                             await patientsApi.update(patient.id, { photoUrl: publicUrl });
                                             setCurrentPhoto(publicUrl);
+                                            patient.photoUrl = publicUrl;
+                                            if (onUpdatePatient) onUpdatePatient({ id: patient.id, photoUrl: publicUrl });
                                             toast.success('Foto atualizada!');
                                         } catch (err) {
                                             console.error(err);
@@ -755,17 +993,89 @@ const PatientDetailModal = ({ patient, onClose, currentUnit, professionals, unit
                             </label>
                         </div>
 
-                        <button
-                            onClick={handleStartCamera}
-                            className="absolute bottom-0 right-0 p-2 bg-primary text-white rounded-full hover:bg-primary-hover shadow-lg transition-transform hover:scale-105 z-10"
-                            title="Tirar foto com câmera"
-                        >
-                            <Camera className="w-4 h-4" />
-                        </button>
+                        <div className="absolute bottom-0 right-0 flex items-center gap-1 z-10">
+                            {currentPhoto && (
+                                <button
+                                    type="button"
+                                    onClick={handleDeletePhoto}
+                                    className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 shadow-md transition-transform hover:scale-105"
+                                    title="Excluir foto de perfil"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={handleStartCamera}
+                                className="p-2 bg-primary text-white rounded-full hover:bg-primary-hover shadow-md transition-transform hover:scale-105"
+                                title="Tirar foto com câmera"
+                            >
+                                <Camera className="w-3.5 h-3.5" />
+                            </button>
+                        </div>
                     </div>
 
                     <h2 className="text-xl font-bold text-center text-gray-900">{patient.name}</h2>
-                    <span className="text-sm text-gray-500 mb-6">{patient.phone}</span>
+                    <a
+                        href={getWhatsappUrl(patient.phone)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-sm text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1.5 hover:underline mb-3 transition-colors"
+                        title="Abrir conversa no WhatsApp"
+                    >
+                        <PhoneIcon className="w-4 h-4 text-emerald-600 fill-emerald-50" />
+                        <span>{patient.phone}</span>
+                    </a>
+
+                    {/* Centralized Action Buttons */}
+                    <div className="w-full flex flex-col gap-2 mb-4">
+                        {onEdit && (
+                            <button
+                                onClick={() => { onClose(); onEdit(patient); }}
+                                className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm"
+                            >
+                                <Edit2 className="w-3.5 h-3.5" /> Editar Cadastro
+                            </button>
+                        )}
+
+                        {onOpenFacialScan && (
+                            <button
+                                onClick={() => onOpenFacialScan(patient)}
+                                className="w-full py-1.5 px-3 text-xs font-semibold rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition-all flex items-center justify-center gap-1.5"
+                                title="Escanear biometria facial do paciente"
+                            >
+                                <span>{patient.facialDescriptor ? 'Face Cadastrada ✓' : 'Escanear Biometria'}</span>
+                            </button>
+                        )}
+
+                        <div className="flex gap-2 w-full mt-1">
+                            {onToggleStatus && (
+                                <button
+                                    onClick={() => onToggleStatus(patient)}
+                                    className={`flex-1 py-1.5 px-2 text-xs font-semibold rounded-xl border transition-colors flex items-center justify-center gap-1 ${patient.status === 'Active' ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
+                                >
+                                    {patient.status === 'Active' ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                                    {patient.status === 'Active' ? 'Inativar' : 'Ativar'}
+                                </button>
+                            )}
+
+                            {onDelete && (
+                                <button
+                                    onClick={() => {
+                                        if (confirm('Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.')) {
+                                            onClose();
+                                            onDelete(patient.id);
+                                        }
+                                    }}
+                                    className="py-1.5 px-2.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1"
+                                    title="Excluir paciente"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" /> Excluir
+                                </button>
+                            )}
+                        </div>
+                    </div>
 
                     <div className="w-full border-t border-gray-200 pt-4 mt-auto hidden md:block">
                         <p className="text-xs text-center text-gray-400">Cadastrado em {new Date().toLocaleDateString('pt-BR')}</p>
@@ -1161,6 +1471,7 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
 
     const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
     const [planFilter, setPlanFilter] = useState<'All' | 'ActivePlan' | 'ExpiredPlan'>('All');
+    const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
     const filteredPatients = patientsList.filter(patient => {
         const matchesSearch = patient.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1182,55 +1493,112 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
         return matchesSearch && matchesStatus && matchesPlan && matchesUnit;
     });
 
+    const [currentPage, setCurrentPage] = useState(1);
+    const [itemsPerPage, setItemsPerPage] = useState(12);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, statusFilter, planFilter, currentUnit]);
+
+    const totalPages = Math.ceil(filteredPatients.length / itemsPerPage) || 1;
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = Math.min(startIndex + itemsPerPage, filteredPatients.length);
+    const paginatedPatients = filteredPatients.slice(startIndex, startIndex + itemsPerPage);
+
     const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+    const [facialScanPatient, setFacialScanPatient] = useState<Patient | null>(null);
+
+    const handleSaveFacialData = async (descriptor: string) => {
+        if (!facialScanPatient) return;
+        try {
+            await patientsApi.update(facialScanPatient.id, {
+                facialDescriptor: descriptor
+            });
+            handlePatientUpdated({ id: facialScanPatient.id, facialDescriptor: descriptor });
+            toast.success('Biometria facial registrada!');
+        } catch (error) {
+            console.error('Error saving facial descriptor:', error);
+            toast.error('Erro ao salvar biometria facial');
+        }
+    };
+
+    const [confirmModal, setConfirmModal] = useState<{
+        isOpen: boolean;
+        title: string;
+        description: string;
+        confirmLabel?: string;
+        variant?: 'danger' | 'warning' | 'info';
+        onConfirm: () => void;
+    }>({
+        isOpen: false,
+        title: '',
+        description: '',
+        onConfirm: () => {}
+    });
+
+    const handlePatientUpdated = (updated: Partial<Patient> & { id: string }) => {
+        setPatientsList(prev => prev.map(p => p.id === updated.id ? { ...p, ...updated } : p));
+        setSelectedPatient(prev => prev && prev.id === updated.id ? { ...prev, ...updated } : prev);
+    };
 
     const handleCreatePatient = async (patientData: Patient) => {
         try {
             if (editingPatient) {
                 await patientsApi.update(patientData.id, patientData);
+                handlePatientUpdated(patientData);
                 toast.success('Paciente atualizado com sucesso!');
             } else {
-                await patientsApi.create(patientData);
+                const newPatient = await patientsApi.create(patientData);
+                setPatientsList(prev => [newPatient, ...prev]);
                 toast.success('Paciente cadastrado com sucesso!');
             }
             setIsCreateModalOpen(false);
             setEditingPatient(null);
-            loadData();
         } catch (error) {
             console.error('Error saving patient:', error);
             toast.error('Erro ao salvar paciente');
         }
     };
 
-    const handleDeletePatient = async (id: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (confirm('Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.')) {
-            try {
-                await patientsApi.delete(id);
-                toast.success('Paciente excluído com sucesso');
-                loadData();
-            } catch (error) {
-                console.error('Error deleting patient:', error);
-                toast.error('Erro ao excluir paciente');
+    const handleDeletePatient = (id: string, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
+        setConfirmModal({
+            isOpen: true,
+            title: 'Excluir Paciente',
+            description: 'Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.',
+            confirmLabel: 'Excluir Paciente',
+            variant: 'danger',
+            onConfirm: async () => {
+                try {
+                    await patientsApi.delete(id);
+                    setPatientsList(prev => prev.filter(p => p.id !== id));
+                    if (selectedPatient?.id === id) setSelectedPatient(null);
+                    toast.success('Paciente excluído com sucesso');
+                } catch (error) {
+                    console.error('Error deleting patient:', error);
+                    toast.error('Erro ao excluir paciente');
+                } finally {
+                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                }
             }
-        }
+        });
     };
 
-    const handleToggleStatus = async (patient: Patient, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const handleToggleStatus = async (patient: Patient, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
         try {
             const newStatus = patient.status === 'Active' ? 'Inactive' : 'Active';
             await patientsApi.update(patient.id, { status: newStatus });
+            handlePatientUpdated({ id: patient.id, status: newStatus });
             toast.success(`Paciente ${newStatus === 'Active' ? 'ativado' : 'inativado'} com sucesso`);
-            loadData();
         } catch (error) {
             console.error('Error updating status:', error);
             toast.error('Erro ao atualizar status');
         }
     };
 
-    const openEditModal = (patient: Patient, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const openEditModal = (patient: Patient, e?: React.MouseEvent) => {
+        if (e) e.stopPropagation();
         setEditingPatient(patient);
         setIsCreateModalOpen(true);
     };
@@ -1281,88 +1649,295 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                         <option value="ActivePlan">Plano Ativo</option>
                         <option value="ExpiredPlan">Sem Sessões</option>
                     </select>
+
+                    {/* View Mode Toggle */}
+                    <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200/80">
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('grid')}
+                            className={`px-3 py-1.5 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-all ${
+                                viewMode === 'grid'
+                                    ? 'bg-white text-gray-900 shadow-sm font-bold'
+                                    : 'text-gray-500 hover:text-gray-900'
+                            }`}
+                            title="Visualização em Cards"
+                        >
+                            <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="hidden sm:inline">Cards</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setViewMode('table')}
+                            className={`px-3 py-1.5 rounded-lg font-medium text-xs flex items-center gap-1.5 transition-all ${
+                                viewMode === 'table'
+                                    ? 'bg-white text-gray-900 shadow-sm font-bold'
+                                    : 'text-gray-500 hover:text-gray-900'
+                            }`}
+                            title="Visualização em Lista / Tabela"
+                        >
+                            <List className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="hidden sm:inline">Lista</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {loading ? (
                 <div className="flex justify-center p-8 text-gray-500">Carregando pacientes...</div>
             ) : filteredPatients.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredPatients.map(patient => (
-                        <div key={patient.id} onClick={() => setSelectedPatient(patient)} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer group relative">
-
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="flex items-center gap-3">
-                                    {patient.photoUrl ? (
-                                        <img src={patient.photoUrl} alt={patient.name} className="w-12 h-12 rounded-full object-cover" />
-                                    ) : (
-                                        <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 font-bold text-lg group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
-                                            {patient.name.charAt(0)}
-                                        </div>
-                                    )}
+                <>
+                    {viewMode === 'grid' ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {paginatedPatients.map(patient => (
+                                <div
+                                    key={patient.id}
+                                    onClick={() => setSelectedPatient(patient)}
+                                    className="bg-white p-5 rounded-2xl border border-gray-200/90 shadow-sm hover:shadow-md hover:border-blue-400 transition-all cursor-pointer group relative flex flex-col justify-between"
+                                >
                                     <div>
-                                        <h3 className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors">{patient.name}</h3>
-                                        <p className="text-xs text-gray-500">{patient.phone}</p>
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-3">
+                                                {patient.photoUrl ? (
+                                                    <img src={patient.photoUrl} alt={patient.name} className="w-12 h-12 rounded-full object-cover shadow-sm ring-2 ring-gray-100" />
+                                                ) : (
+                                                    <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 font-bold text-lg flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors shadow-sm">
+                                                        {patient.name.charAt(0)}
+                                                    </div>
+                                                )}
+                                                <div>
+                                                    <h3 className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors flex items-center gap-1.5">
+                                                        {patient.name}
+                                                    </h3>
+                                                    <a
+                                                        href={getWhatsappUrl(patient.phone)}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 hover:underline transition-colors mt-0.5"
+                                                        title="Conversar no WhatsApp"
+                                                    >
+                                                        <PhoneIcon className="w-3.5 h-3.5 text-emerald-600 fill-emerald-50" />
+                                                        <span>{patient.phone}</span>
+                                                    </a>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-col items-end gap-1">
+                                                <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-full">
+                                                    {allUnits.find(u => u.id === patient.unitId)?.name || 'N/A'}
+                                                </span>
+                                                <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${patient.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-600 border border-gray-200'}`}>
+                                                    {patient.status === 'Active' ? 'Em Tratamento' : 'Inativo'}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2 py-2 border-t border-gray-100">
+                                            <div className="flex items-center justify-between text-xs">
+                                                <span className="text-gray-500 font-medium">Plano Contratado</span>
+                                                <span className="font-bold text-gray-800">{patient.plan?.name || 'Sem plano'}</span>
+                                            </div>
+                                            <div className="flex items-center justify-between text-xs">
+                                                <span className="text-gray-500 font-medium">Sessões Restantes</span>
+                                                <span className="font-bold text-gray-900">
+                                                    {patient.plan ? `${patient.plan.remainingSessions} de ${patient.plan.totalSessions}` : '-'}
+                                                </span>
+                                            </div>
+                                            {patient.plan && (
+                                                <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1 overflow-hidden">
+                                                    <div
+                                                        className="bg-blue-600 h-1.5 rounded-full transition-all"
+                                                        style={{ width: `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` }}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-3 mt-3 border-t border-gray-100 flex items-center justify-between text-xs text-blue-600 font-semibold group-hover:text-blue-700">
+                                        <span>Ver Prontuário Completo</span>
+                                        <span className="text-blue-400 group-hover:translate-x-1 transition-transform">→</span>
                                     </div>
                                 </div>
-
-                                <div className="flex flex-col items-end gap-1">
-                                    <span className="text-[10px] uppercase font-bold text-gray-400 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded-full">
-                                        {allUnits.find(u => u.id === patient.unitId)?.name || 'N/A'}
-                                    </span>
-                                    <span className={`px-2 py-1 rounded text-xs font-medium ${patient.status === 'Active' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'
-                                        }`}>
-                                        {patient.status === 'Active' ? 'Em Tratamento' : 'Inativo'}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div className="space-y-3 mb-4">
-                                <div className="flex items-center justify-between text-sm">
-                                    <span className="text-gray-500">Plano</span>
-                                    <span className="font-medium text-gray-900">{patient.plan?.name || 'Sem plano'}</span>
-                                </div>
-                                <div className="flex items-center justify-between text-sm">
-                                    <span className="text-gray-500">Sessões</span>
-                                    <span className="font-medium text-gray-900">
-                                        {patient.plan ? `${patient.plan.remainingSessions} / ${patient.plan.totalSessions}` : '-'}
-                                    </span>
-                                </div>
-                                <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
-                                    <div
-                                        className="bg-blue-600 h-1.5 rounded-full"
-                                        style={{ width: patient.plan ? `${(patient.plan.remainingSessions / patient.plan.totalSessions) * 100}%` : '0%' }}
-                                    />
-                                </div>
-                            </div>
-
-                            {/* Action Buttons */}
-                            < div className="flex justify-end gap-2 pt-3 border-t border-gray-50 opacity-100 transition-opacity" >
-                                <button
-                                    onClick={(e) => openEditModal(patient, e)}
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="Editar"
-                                >
-                                    <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                    onClick={(e) => handleToggleStatus(patient, e)}
-                                    className={`p-1.5 rounded-lg transition-colors ${patient.status === 'Active' ? 'text-orange-600 hover:bg-orange-50' : 'text-green-600 hover:bg-green-50'}`}
-                                    title={patient.status === 'Active' ? 'Inativar' : 'Ativar'}
-                                >
-                                    {patient.status === 'Active' ? <XCircle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-                                </button>
-                                <button
-                                    onClick={(e) => handleDeletePatient(patient.id, e)}
-                                    className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Excluir"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
+                            ))}
+                        </div>
+                    ) : (
+                        /* Table View Mode */
+                        <div className="bg-white rounded-2xl border border-gray-200/90 shadow-sm overflow-hidden animate-fade-in">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-gray-50/80 border-b border-gray-200/80 text-xs font-bold text-gray-500 uppercase tracking-wider">
+                                            <th className="px-6 py-4">Paciente</th>
+                                            <th className="px-6 py-4">Telefone / WhatsApp</th>
+                                            <th className="px-6 py-4">Unidade</th>
+                                            <th className="px-6 py-4">Plano Contratado</th>
+                                            <th className="px-6 py-4 text-center">Sessões Restantes</th>
+                                            <th className="px-6 py-4 text-center">Status</th>
+                                            <th className="px-6 py-4 text-right">Ação</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100 text-sm">
+                                        {paginatedPatients.map(patient => (
+                                            <tr
+                                                key={patient.id}
+                                                onClick={() => setSelectedPatient(patient)}
+                                                className="hover:bg-blue-50/30 transition-colors cursor-pointer group"
+                                            >
+                                                <td className="px-6 py-4 font-medium text-gray-900">
+                                                    <div className="flex items-center gap-3">
+                                                        {patient.photoUrl ? (
+                                                            <img src={patient.photoUrl} alt={patient.name} className="w-10 h-10 rounded-full object-cover shadow-sm ring-2 ring-gray-100" />
+                                                        ) : (
+                                                            <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 font-bold text-sm flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors shadow-sm">
+                                                                {patient.name.charAt(0)}
+                                                            </div>
+                                                        )}
+                                                        <div>
+                                                            <div className="font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                                {patient.name}
+                                                            </div>
+                                                            {patient.cpf && (
+                                                                <div className="text-xs text-gray-400 font-mono mt-0.5">
+                                                                    CPF: {patient.cpf}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <a
+                                                        href={getWhatsappUrl(patient.phone)}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-600 hover:text-emerald-700 hover:underline transition-colors"
+                                                        title="Conversar no WhatsApp"
+                                                    >
+                                                        <PhoneIcon className="w-3.5 h-3.5 text-emerald-600 fill-emerald-50" />
+                                                        <span>{patient.phone}</span>
+                                                    </a>
+                                                </td>
+                                                <td className="px-6 py-4">
+                                                    <span className="text-xs font-semibold text-gray-600 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full">
+                                                        {allUnits.find(u => u.id === patient.unitId)?.name || 'N/A'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-gray-800 font-medium">
+                                                    {patient.plan?.name || 'Sem plano'}
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    {patient.plan ? (
+                                                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                                            {patient.plan.remainingSessions} de {patient.plan.totalSessions}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-gray-400 text-xs">-</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 text-center">
+                                                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold ${patient.status === 'Active' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-600 border border-gray-200'}`}>
+                                                        {patient.status === 'Active' ? 'Em Tratamento' : 'Inativo'}
+                                                    </span>
+                                                </td>
+                                                <td className="px-6 py-4 text-right">
+                                                    <span className="text-xs font-semibold text-blue-600 group-hover:text-blue-700 flex items-center justify-end gap-1">
+                                                        <span>Ver Prontuário</span>
+                                                        <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
-                    ))}
-                </div>
+                    )}
+
+                    {/* Pagination Controls Bar */}
+                    <div className="bg-white px-6 py-4 rounded-2xl border border-gray-200/90 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 mt-6">
+                        <div className="flex items-center gap-3 text-xs text-gray-500 font-medium">
+                            <span>
+                                Mostrando <strong className="text-gray-900">{filteredPatients.length > 0 ? startIndex + 1 : 0}</strong> a <strong className="text-gray-900">{endIndex}</strong> de <strong className="text-gray-900">{filteredPatients.length}</strong> pacientes
+                            </span>
+                            <span className="hidden md:inline text-gray-300">|</span>
+                            <div className="hidden md:flex items-center gap-1.5">
+                                <span>Exibir:</span>
+                                <select
+                                    value={itemsPerPage}
+                                    onChange={(e) => {
+                                        setItemsPerPage(Number(e.target.value));
+                                        setCurrentPage(1);
+                                    }}
+                                    className="bg-gray-50 border border-gray-200 text-gray-800 text-xs font-bold rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                >
+                                    <option value={9}>9 por pág.</option>
+                                    <option value={12}>12 por pág.</option>
+                                    <option value={24}>24 por pág.</option>
+                                    <option value={48}>48 por pág.</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                                disabled={currentPage === 1}
+                                className={`p-2 rounded-lg border text-xs font-medium flex items-center gap-1 transition-all ${
+                                    currentPage === 1
+                                        ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 shadow-sm cursor-pointer'
+                                }`}
+                                title="Página Anterior"
+                            >
+                                <ChevronLeft className="w-4 h-4" />
+                                <span className="hidden sm:inline">Anterior</span>
+                            </button>
+
+                            {/* Page Numbers */}
+                            <div className="flex items-center gap-1">
+                                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                    .filter(page => page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1)
+                                    .map((page, idx, arr) => {
+                                        const prevPage = arr[idx - 1];
+                                        const showEllipsis = prevPage && page - prevPage > 1;
+                                        return (
+                                            <React.Fragment key={page}>
+                                                {showEllipsis && <span className="px-1 text-gray-400 text-xs">...</span>}
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setCurrentPage(page)}
+                                                    className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${
+                                                        currentPage === page
+                                                            ? 'bg-primary text-white shadow-sm shadow-primary/30'
+                                                            : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+                                                    }`}
+                                                >
+                                                    {page}
+                                                </button>
+                                            </React.Fragment>
+                                        );
+                                    })}
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                                disabled={currentPage === totalPages}
+                                className={`p-2 rounded-lg border text-xs font-medium flex items-center gap-1 transition-all ${
+                                    currentPage === totalPages
+                                        ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+                                        : 'bg-white text-gray-700 hover:bg-gray-50 border-gray-200 shadow-sm cursor-pointer'
+                                }`}
+                                title="Próxima Página"
+                            >
+                                <span className="hidden sm:inline">Próxima</span>
+                                <ChevronRight className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                </>
             ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-center animate-fade-in">
                     <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
@@ -1402,10 +1977,37 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
                         currentUnit={currentUnit}
                         professionals={professionals}
                         units={allUnits}
+                        onOpenFacialScan={(p) => setFacialScanPatient(p)}
+                        onEdit={(p) => openEditModal(p)}
+                        onToggleStatus={(p) => handleToggleStatus(p)}
+                        onDelete={(id) => handleDeletePatient(id)}
+                        onUpdatePatient={handlePatientUpdated}
+                        onRequestConfirm={(config) => setConfirmModal({ ...config, isOpen: true })}
                     />
                 )
             }
-        </div >
+
+            {
+                facialScanPatient && (
+                    <FacialScanModal
+                        isOpen={!!facialScanPatient}
+                        onClose={() => setFacialScanPatient(null)}
+                        patientName={facialScanPatient.name}
+                        onSaveFacialData={handleSaveFacialData}
+                    />
+                )
+            }
+
+            <ConfirmModal
+                isOpen={confirmModal.isOpen}
+                onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={confirmModal.onConfirm}
+                title={confirmModal.title}
+                description={confirmModal.description}
+                confirmLabel={confirmModal.confirmLabel}
+                variant={confirmModal.variant}
+            />
+        </div>
     );
 };
 

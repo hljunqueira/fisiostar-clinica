@@ -2,6 +2,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { Session, SessionStatus, Professional, Patient, Unit, WeekDay } from '../../types';
 import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical } from 'lucide-react';
+import { getSavedColorConfig, getColorStyles } from './CalendarColorModal';
 
 interface WeekViewProps {
     currentDate: Date;
@@ -43,7 +44,7 @@ const SESSION_COLORS = [
 
 const getColorByProfessional = (professionalId: string, professionals: Professional[]) => {
     const index = professionals.findIndex(p => p.id === professionalId);
-    return SESSION_COLORS[index % SESSION_COLORS.length];
+    return SESSION_COLORS[index >= 0 ? index % SESSION_COLORS.length : 0];
 };
 
 const getStatusOverrideColor = (status: SessionStatus) => {
@@ -55,6 +56,24 @@ const getStatusOverrideColor = (status: SessionStatus) => {
         default:
             return null;
     }
+};
+
+const getDynamicColor = (session: Session, professionals: Professional[]) => {
+    const config = getSavedColorConfig();
+
+    if (config.mode === 'status') {
+        const found = config.statusColors[session.status];
+        if (found) return found;
+    } else if (config.mode === 'specialty') {
+        const found = config.specialtyColors[session.type];
+        if (found) return found;
+    } else if (config.mode === 'professional') {
+        const found = config.professionalColors[session.professionalId];
+        if (found) return found;
+    }
+
+    const statusColor = getStatusOverrideColor(session.status);
+    return statusColor || getColorByProfessional(session.professionalId, professionals);
 };
 
 const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professionals, patients, unit, units, onEditSession, onDateClick, onUpdateSession }) => {
@@ -171,11 +190,14 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
         <div className="flex-1 flex flex-col h-full bg-white overflow-hidden rounded-lg border border-gray-200">
             {/* Week Range Header (ZenFisio Style) */}
             <div className="flex items-center justify-center py-2 bg-gray-50 border-b border-gray-200">
-                <span className="text-lg font-semibold text-gray-800">{formatWeekRange()}</span>
+                <span className="text-base sm:text-lg font-semibold text-gray-800">{formatWeekRange()}</span>
             </div>
 
-            {/* Days Header Row */}
-            <div className="grid grid-cols-[50px_repeat(6,1fr)] border-b border-gray-300 bg-gray-100 sticky top-0 z-10">
+            {/* Scrollable Container for Mobile Responsiveness */}
+            <div className="overflow-x-auto flex-1 flex flex-col min-w-full custom-scrollbar">
+                <div className="min-w-[650px] flex-1 flex flex-col">
+                    {/* Days Header Row */}
+                    <div className="grid grid-cols-[50px_repeat(6,1fr)] border-b border-gray-300 bg-gray-100 sticky top-0 z-10">
                 <div className="border-r border-gray-300"></div>
                 {weekDays.map((dayDate, idx) => {
                     const dayYMD = formatDateYMD(dayDate);
@@ -259,9 +281,9 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                     const [sessionHour, sessionMin] = session.time.split(':').map(Number);
                                     const topOffset = (sessionHour - startHour) * 60 + (sessionMin / 60) * 60;
 
-                                    // Use status override or professional color
-                                    const statusColor = getStatusOverrideColor(session.status);
-                                    const color = statusColor || getColorByProfessional(session.professionalId, professionals);
+                                    // Use dynamic user-configured color (supports preset and custom HEX)
+                                    const colorObj = getDynamicColor(session, professionals);
+                                    const colorStyles = getColorStyles(colorObj);
                                     const isDragging = draggingSession?.id === session.id;
 
                                     return (
@@ -271,8 +293,8 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                             onDragStart={(e) => handleDragStart(e, session)}
                                             onDragEnd={handleDragEnd}
                                             onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
-                                            className={`absolute left-0.5 right-0.5 p-1 rounded-sm border-l-[3px] text-[10px] leading-tight cursor-pointer hover:z-20 hover:shadow-lg hover:scale-[1.02] transition-all overflow-hidden ${color.bg} ${color.border} ${color.text} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                                            style={{ top: `${topOffset}px`, height: '55px' }}
+                                            className={`absolute left-0.5 right-0.5 p-1 rounded-sm border-l-[3px] text-[10px] leading-tight cursor-pointer hover:z-20 hover:shadow-lg hover:scale-[1.02] transition-all overflow-hidden ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                            style={{ top: `${topOffset}px`, height: '55px', ...colorStyles.style }}
                                             title={`${session.time} - ${patient?.name} (${profName}) - Arraste para mover`}
                                         >
                                             <div className="flex items-start justify-between">
@@ -296,7 +318,9 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                 </div>
             </div>
         </div>
-    );
+    </div>
+</div>
+);
 };
 
 export default WeekView;

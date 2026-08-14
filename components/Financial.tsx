@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { ConfirmModal } from './ConfirmModal';
 import { FinancialDashboard } from './FinancialDashboard';
-import { DollarSign, Calendar, CheckCircle2, Clock, Download, Filter, Plus, TrendingUp, TrendingDown, X, Save, Trash2 } from 'lucide-react';
+import { DollarSign, Calendar, CheckCircle2, Clock, Download, Filter, Plus, TrendingUp, TrendingDown, X, Save, Trash2, FileText } from 'lucide-react';
 import { UnitId, Professional, Patient } from '../types';
 import type { Payment, Expense, Revenue, CreateExpense, CreateRevenue } from '../src/types/financial';
 import { paymentsApi, expensesApi, revenuesApi } from '../src/services/financial-api';
-import { professionalsApi, patientsApi, unitsApi } from '../src/services/api';
+import { professionalsApi, patientsApi, unitsApi, sessionsApi, auditLogsApi } from '../src/services/api';
 import toast from 'react-hot-toast';
 
 interface FinancialProps {
@@ -17,7 +17,7 @@ type TabType = 'receitas' | 'despesas' | 'pagamentos';
 type PeriodFilter = 'week' | 'month' | 'all';
 
 const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => {
-    const [activeTab, setActiveTab] = useState<TabType>('receitas');
+    const [activeTab, setActiveTab] = useState<TabType>('pagamentos');
     const [payments, setPayments] = useState<Payment[]>([]);
     const [expenses, setExpenses] = useState<Expense[]>([]);
     const [revenues, setRevenues] = useState<Revenue[]>([]);
@@ -75,21 +75,76 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
         setShowPaymentModal(true);
     };
 
-    const confirmPayment = async (paymentMethod: 'cash' | 'bank_transfer' | 'pix' | 'check', notes?: string) => {
+    const confirmPayment = async (paymentMethod: string, notes?: string, paidAt?: string) => {
         if (!selectedPayment) return;
         try {
+            const prof = professionals.find(p => p.id === selectedPayment.professionalId);
             await paymentsApi.markAsPaid(selectedPayment.id, {
-                paymentMethod,
+                paymentMethod: paymentMethod as any,
                 paidBy: currentUserId,
                 notes
             });
             await loadData();
             setShowPaymentModal(false);
+
+            // Audit log
+            const methodLabels: Record<string, string> = {
+                pix: 'PIX',
+                bank_transfer: 'Transferência Bancária',
+                cash: 'Dinheiro Espécie',
+                credit_card: 'Cartão de Crédito',
+                debit_card: 'Cartão de Débito',
+                check: 'Cheque'
+            };
+            await auditLogsApi.logAction({
+                userName: 'Financeiro',
+                userRole: 'admin',
+                category: 'financial',
+                action: 'Pagamento a Profissional Confirmado',
+                details: `Confirmou repasse de R$ ${selectedPayment.totalAmount.toFixed(2)} (${methodLabels[paymentMethod] || paymentMethod}) para o profissional ${prof?.name || 'Profissional'} referente a ${selectedPayment.totalSessions} sessões.`
+            });
+
             setSelectedPayment(null);
-            toast.success('Pagamento registrado!');
+            toast.success('Pagamento registrado com sucesso!');
         } catch (error) {
             console.error('Error marking payment as paid:', error);
             toast.error('Erro ao registrar pagamento');
+        }
+    };
+
+    const handleGeneratePayroll = async () => {
+        try {
+            const allSessions = await sessionsApi.getAll(currentUnit === 'ALL' ? {} : { unitId: currentUnit });
+            const now = new Date();
+            const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+            const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+            let created = 0;
+            for (const prof of professionals) {
+                const profSessions = allSessions.filter(s => s.professionalId === prof.id && s.status === 'Realizada');
+                if (profSessions.length > 0) {
+                    const totalAmount = profSessions.length * (prof.hourlyRate || 0);
+                    await paymentsApi.create({
+                        professionalId: prof.id,
+                        periodStart,
+                        periodEnd,
+                        totalSessions: profSessions.length,
+                        amountPerSession: prof.hourlyRate || 0,
+                        totalAmount
+                    });
+                    created++;
+                }
+            }
+
+            if (created > 0) {
+                toast.success(`${created} folha(s) de pagamento gerada(s) com sucesso!`);
+                await loadData();
+            } else {
+                toast.error('Nenhuma sessão realizada pendente no período atual.');
+            }
+        } catch (error) {
+            console.error('Error generating payroll:', error);
+            toast.error('Erro ao gerar folha de pagamento');
         }
     };
 
@@ -267,7 +322,19 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
                     {/* Pagamentos Tab */}
                     {activeTab === 'pagamentos' && (
                         <div className="space-y-4">
-                            <h3 className="text-lg font-semibold text-gray-900">Pagamentos a Profissionais</h3>
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 pb-3 border-b border-gray-100">
+                                <div>
+                                    <h3 className="text-lg font-bold text-gray-900">Pagamentos a Profissionais (Folha de Pagamento)</h3>
+                                    <p className="text-xs text-gray-500">Gerencie a folha de pagamento, repasses e comissões da equipe técnica.</p>
+                                </div>
+                                <button
+                                    onClick={handleGeneratePayroll}
+                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-md shadow-blue-600/20 text-xs font-bold shrink-0"
+                                >
+                                    <FileText className="h-4 w-4" />
+                                    Gerar Folha de Pagamento
+                                </button>
+                            </div>
                             <PaymentsTable
                                 payments={payments}
                                 professionals={professionals}
@@ -291,6 +358,14 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
                             await loadData();
                             setShowExpenseModal(false);
                             toast.success('Despesa salva!');
+
+                            await auditLogsApi.logAction({
+                                userName: 'Financeiro',
+                                userRole: 'admin',
+                                category: 'financial',
+                                action: 'Nova Despesa Lançada',
+                                details: `Cadastrou despesa no valor de R$ ${expenseData.amount.toFixed(2)} (${expenseData.description}).`
+                            });
                         } catch (error) {
                             console.error('Error saving expense:', error);
                             toast.error('Erro ao salvar despesa');
@@ -313,6 +388,14 @@ const Financial: React.FC<FinancialProps> = ({ currentUnit, currentUserId }) => 
                             await loadData();
                             setShowRevenueModal(false);
                             toast.success('Receita salva!');
+
+                            await auditLogsApi.logAction({
+                                userName: 'Financeiro',
+                                userRole: 'admin',
+                                category: 'financial',
+                                action: 'Nova Receita Entrante Lançada',
+                                details: `Cadastrou recebimento no valor de R$ ${revenueData.amount.toFixed(2)} (${revenueData.description}).`
+                            });
                         } catch (error) {
                             console.error('Error saving revenue:', error);
                             toast.error('Erro ao salvar receita');
@@ -559,92 +642,118 @@ const ExpenseModal = ({ expense, unitId, units, userId, onSave, onCancel }: { ex
         unitId: unitId === 'ALL' ? (expense?.unitId || units[0]?.id) : unitId
     });
 
+    const categoryLabels: Record<string, string> = {
+        rent: 'Aluguel & Imóvel',
+        utilities: 'Utilidades (Água/Luz/Internet)',
+        supplies: 'Materiais e Insumos',
+        maintenance: 'Manutenção & Equipamentos',
+        salaries: 'Salários & Comissões',
+        marketing: 'Marketing & Publicidade',
+        other: 'Outras Despesas'
+    };
+
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-gray-900">{expense ? 'Editar Despesa' : 'Nova Despesa'}</h3>
-                    <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-100">
+                {/* Header */}
+                <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <TrendingDown className="w-5 h-5 text-red-600" />
+                            {expense ? 'Editar Despesa' : 'Lançar Nova Despesa'}
+                        </h3>
+                        <p className="text-xs text-gray-500">Cadastre saídas e contas a pagar da clínica</p>
+                    </div>
+                    <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-white transition-all cursor-pointer">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                <div className="space-y-4">
-                    {unitId === 'ALL' && (
+                <form onSubmit={(e) => { e.preventDefault(); onSave({ ...formData, unitId: formData.unitId || unitId, createdBy: userId }); }} className="p-6 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {unitId === 'ALL' && (
+                            <div>
+                                <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Unidade Clínica</label>
+                                <select
+                                    value={formData.unitId}
+                                    onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                                >
+                                    {units.map(u => (
+                                        <option key={u.id} value={u.id}>{u.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
                         <div>
-                            <label className="text-sm font-medium text-gray-700 block mb-1">Unidade</label>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Categoria da Despesa</label>
                             <select
-                                value={formData.unitId}
-                                onChange={(e) => setFormData({ ...formData, unitId: e.target.value })}
-                                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                value={formData.category}
+                                onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
                             >
-                                {units.map(u => (
-                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                {Object.entries(categoryLabels).map(([key, label]) => (
+                                    <option key={key} value={key}>{label}</option>
                                 ))}
                             </select>
                         </div>
-                    )}
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Categoria</label>
-                        <select
-                            value={formData.category}
-                            onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Valor (R$)</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                required
+                                value={formData.amount || ''}
+                                onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                                placeholder="0,00"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Data de Lançamento</label>
+                            <input
+                                type="date"
+                                required
+                                value={formData.expenseDate}
+                                onChange={(e) => setFormData({ ...formData, expenseDate: e.target.value })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Descrição da Despesa</label>
+                            <input
+                                type="text"
+                                required
+                                value={formData.description}
+                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-medium text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                                placeholder="Ex: Pagamento conta de energia referente ao mês 08"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-5 py-2.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
                         >
-                            <option value="rent">Aluguel</option>
-                            <option value="utilities">Utilidades</option>
-                            <option value="supplies">Materiais</option>
-                            <option value="maintenance">Manutenção</option>
-                            <option value="salaries">Salários</option>
-                            <option value="marketing">Marketing</option>
-                            <option value="other">Outros</option>
-                        </select>
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                            <Save className="w-4 h-4" />
+                            Salvar Despesa
+                        </button>
                     </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Descrição</label>
-                        <input
-                            type="text"
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Descrição da despesa"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Valor (R$)</label>
-                        <input
-                            type="number"
-                            step="0.01"
-                            value={formData.amount}
-                            onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Data</label>
-                        <input
-                            type="date"
-                            value={formData.expenseDate}
-                            onChange={(e) => setFormData({ ...formData, expenseDate: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-                </div>
-
-                <div className="flex gap-3 mt-6">
-                    <button onClick={onCancel} className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">
-                        Cancelar
-                    </button>
-                    <button
-                        onClick={() => onSave({ ...formData, unitId: formData.unitId || unitId, createdBy: userId })}
-                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium"
-                    >
-                        Salvar
-                    </button>
-                </div>
+                </form>
             </div>
         </div>
     );
@@ -653,7 +762,7 @@ const ExpenseModal = ({ expense, unitId, units, userId, onSave, onCancel }: { ex
 // Revenue Modal
 const RevenueModal = ({ unitId, units, userId, patients, onSave, onCancel }: { unitId: string, units: any[], userId: string, patients: Patient[], onSave: (r: CreateRevenue) => void, onCancel: () => void }) => {
     const [formData, setFormData] = useState({
-        category: 'other' as 'patient_plan' | 'session' | 'other',
+        category: 'patient_plan' as 'patient_plan' | 'session' | 'other',
         description: '',
         amount: 0,
         revenueDate: new Date().toISOString().split('T')[0],
@@ -662,189 +771,298 @@ const RevenueModal = ({ unitId, units, userId, patients, onSave, onCancel }: { u
         unitId: unitId === 'ALL' ? units[0]?.id : unitId
     });
 
+    const paymentMethods = [
+        { value: 'pix', label: '⚡ PIX', color: 'border-emerald-200 bg-emerald-50/50 text-emerald-700 hover:bg-emerald-100' },
+        { value: 'credit_card', label: '💳 Cartão Crédito', color: 'border-purple-200 bg-purple-50/50 text-purple-700 hover:bg-purple-100' },
+        { value: 'debit_card', label: '💳 Cartão Débito', color: 'border-indigo-200 bg-indigo-50/50 text-indigo-700 hover:bg-indigo-100' },
+        { value: 'bank_transfer', label: '🏦 Transferência', color: 'border-blue-200 bg-blue-50/50 text-blue-700 hover:bg-blue-100' },
+        { value: 'cash', label: '💵 Dinheiro', color: 'border-amber-200 bg-amber-50/50 text-amber-700 hover:bg-amber-100' },
+        { value: 'other', label: '📜 Cheque / Outros', color: 'border-gray-200 bg-gray-50/50 text-gray-700 hover:bg-gray-100' }
+    ];
+
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-gray-900">Nova Receita</h3>
-                    <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-100">
+                {/* Header */}
+                <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 bg-gray-50/50">
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <TrendingUp className="w-5 h-5 text-emerald-600" />
+                            Lançar Nova Receita Entrante
+                        </h3>
+                        <p className="text-xs text-gray-500">Registre recebimentos de planos, sessões avulsas e serviços</p>
+                    </div>
+                    <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 p-1.5 rounded-full hover:bg-white transition-all cursor-pointer">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                <div className="space-y-4">
+                <form onSubmit={(e) => {
+                    e.preventDefault();
+                    onSave({
+                        ...formData,
+                        unitId: formData.unitId || unitId,
+                        createdBy: userId,
+                        patientId: formData.patientId || undefined
+                    });
+                }} className="p-6 space-y-5">
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Categoria da Receita</label>
+                            <select
+                                value={formData.category}
+                                onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                            >
+                                <option value="patient_plan">Plano de Paciente / Pacote</option>
+                                <option value="session">Sessão Avulsa</option>
+                                <option value="other">Outras Receitas</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Paciente Relacionado (opcional)</label>
+                            <select
+                                value={formData.patientId}
+                                onChange={(e) => setFormData({ ...formData, patientId: e.target.value })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                            >
+                                <option value="">Nenhum (Venda Direta / Outros)</option>
+                                {patients.map(p => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Valor do Recebimento (R$)</label>
+                            <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                required
+                                value={formData.amount || ''}
+                                onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                                placeholder="0,00"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Data do Recebimento</label>
+                            <input
+                                type="date"
+                                required
+                                value={formData.revenueDate}
+                                onChange={(e) => setFormData({ ...formData, revenueDate: e.target.value })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                            />
+                        </div>
+
+                        <div className="md:col-span-2">
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Descrição da Receita</label>
+                            <input
+                                type="text"
+                                required
+                                value={formData.description}
+                                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-medium text-gray-900 bg-white outline-none focus:ring-2 focus:ring-emerald-500 shadow-xs"
+                                placeholder="Ex: Pagamento da 1ª parcela do Plano 10 Sessões da paciente Maria"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Forma de Pagamento - Grid de Botões Clicáveis */}
                     <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Categoria</label>
-                        <select
-                            value={formData.category}
-                            onChange={(e) => setFormData({ ...formData, category: e.target.value as any })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-2">Forma de Pagamento</label>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
+                            {paymentMethods.map(option => {
+                                const isSelected = formData.paymentMethod === option.value;
+                                return (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, paymentMethod: option.value as any })}
+                                        className={`p-3 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer flex items-center justify-between min-h-[44px] ${isSelected
+                                            ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm'
+                                            : option.color
+                                            }`}
+                                    >
+                                        <span>{option.label}</span>
+                                        {isSelected && <CheckCircle2 className="w-4 h-4 text-white shrink-0 ml-1" />}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-5 py-2.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
                         >
-                            <option value="patient_plan">Plano de Paciente</option>
-                            <option value="session">Sessão Avulsa</option>
-                            <option value="other">Outros</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Paciente (opcional)</label>
-                        <select
-                            value={formData.patientId}
-                            onChange={(e) => setFormData({ ...formData, patientId: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer"
                         >
-                            <option value="">Nenhum</option>
-                            {patients.map(p => (
-                                <option key={p.id} value={p.id}>{p.name}</option>
-                            ))}
-                        </select>
+                            <Save className="w-4 h-4" />
+                            Salvar Receita
+                        </button>
                     </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Descrição</label>
-                        <input
-                            type="text"
-                            value={formData.description}
-                            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            placeholder="Descrição da receita"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Valor (R$)</label>
-                        <input
-                            type="number"
-                            step="0.01"
-                            value={formData.amount}
-                            onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Forma de Pagamento</label>
-                        <select
-                            value={formData.paymentMethod}
-                            onChange={(e) => setFormData({ ...formData, paymentMethod: e.target.value as any })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="pix">PIX</option>
-                            <option value="cash">Dinheiro</option>
-                            <option value="credit_card">Cartão de Crédito</option>
-                            <option value="debit_card">Cartão de Débito</option>
-                            <option value="bank_transfer">Transferência</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-1">Data</label>
-                        <input
-                            type="date"
-                            value={formData.revenueDate}
-                            onChange={(e) => setFormData({ ...formData, revenueDate: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                    </div>
-                </div>
-
-                <div className="flex gap-3 mt-6">
-                    <button onClick={onCancel} className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">
-                        Cancelar
-                    </button>
-                    <button
-                        onClick={() => onSave({
-                            ...formData,
-                            unitId: formData.unitId || unitId,
-                            createdBy: userId,
-                            patientId: formData.patientId || undefined
-                        })}
-                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                    >
-                        Salvar
-                    </button>
-                </div>
+                </form>
             </div>
         </div>
     );
 };
 
 // Payment Modal
-const PaymentModal = ({ payment, professional, onConfirm, onCancel }: any) => {
-    const [method, setMethod] = useState<'cash' | 'bank_transfer' | 'pix' | 'check'>('pix');
+const PaymentModal = ({ payment, professional, onConfirm, onCancel }: { payment: Payment; professional?: Professional; onConfirm: (method: string, notes?: string, paidAt?: string) => void; onCancel: () => void }) => {
+    const [method, setMethod] = useState<'pix' | 'bank_transfer' | 'cash' | 'credit_card' | 'debit_card' | 'check'>('pix');
     const [notes, setNotes] = useState('');
+    const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+    const [submitting, setSubmitting] = useState(false);
+
+    const paymentMethods = [
+        { value: 'pix', label: '⚡ PIX', color: 'border-emerald-200 bg-emerald-50/50 text-emerald-700 hover:bg-emerald-100' },
+        { value: 'bank_transfer', label: '🏦 Transferência (TED/DOC)', color: 'border-blue-200 bg-blue-50/50 text-blue-700 hover:bg-blue-100' },
+        { value: 'cash', label: '💵 Dinheiro', color: 'border-amber-200 bg-amber-50/50 text-amber-700 hover:bg-amber-100' },
+        { value: 'credit_card', label: '💳 Cartão de Crédito', color: 'border-purple-200 bg-purple-50/50 text-purple-700 hover:bg-purple-100' },
+        { value: 'debit_card', label: '💳 Cartão de Débito', color: 'border-indigo-200 bg-indigo-50/50 text-indigo-700 hover:bg-indigo-100' },
+        { value: 'check', label: '📜 Cheque', color: 'border-gray-200 bg-gray-50/50 text-gray-700 hover:bg-gray-100' }
+    ];
+
+    const handleFormSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setSubmitting(true);
+        try {
+            await onConfirm(method, notes, paymentDate);
+        } finally {
+            setSubmitting(false);
+        }
+    };
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
-                <h3 className="text-xl font-bold text-gray-900 mb-4">Registrar Pagamento</h3>
-
-                <div className="space-y-4">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden border border-gray-100">
+                {/* Modal Header */}
+                <div className="flex justify-between items-center px-6 py-4 border-b border-gray-100 bg-gray-50/50">
                     <div>
-                        <label className="text-sm font-medium text-gray-700">Profissional</label>
-                        <p className="text-gray-900 font-semibold">{professional?.name}</p>
+                        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                            <DollarSign className="w-5 h-5 text-emerald-600" />
+                            Registrar Pagamento de Honorários
+                        </h3>
+                        <p className="text-xs text-gray-500">Repasse de comissões e acerto de sessões realizadas</p>
                     </div>
+                    <button
+                        onClick={onCancel}
+                        className="text-gray-400 hover:text-gray-600 p-1.5 hover:bg-white rounded-full transition-all cursor-pointer"
+                    >
+                        <X className="w-5 h-5" />
+                    </button>
+                </div>
 
-                    <div>
-                        <label className="text-sm font-medium text-gray-700">Período</label>
-                        <p className="text-gray-600">
-                            {new Date(payment.periodStart).toLocaleDateString('pt-BR')} - {new Date(payment.periodEnd).toLocaleDateString('pt-BR')}
-                        </p>
-                    </div>
+                <form onSubmit={handleFormSubmit} className="p-6 space-y-5">
+                    {/* Summary Info Card - 4 Columns */}
+                    <div className="p-4 bg-gradient-to-br from-emerald-50/80 to-blue-50/80 rounded-2xl border border-emerald-100/80 grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+                        <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-full bg-white text-emerald-700 font-bold flex items-center justify-center border border-emerald-200 text-base shadow-xs shrink-0">
+                                {professional?.name?.charAt(0) || 'P'}
+                            </div>
+                            <div>
+                                <p className="text-[10px] text-emerald-700 font-bold uppercase tracking-wider">Profissional</p>
+                                <h4 className="text-sm font-bold text-gray-900">{professional?.name || 'Profissional'}</h4>
+                                <span className="text-[11px] text-gray-500 font-medium">{payment.totalSessions} sessões acumuladas</span>
+                            </div>
+                        </div>
 
-                    <div>
-                        <label className="text-sm font-medium text-gray-700">Valor</label>
-                        <p className="text-2xl font-bold text-gray-900">
-                            R$ {payment.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </p>
-                    </div>
+                        <div className="text-left sm:text-center border-t sm:border-t-0 sm:border-l border-emerald-100/80 pt-2 sm:pt-0 sm:pl-4">
+                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Período de Apuração</p>
+                            <p className="text-xs font-semibold text-gray-800 mt-0.5">
+                                {new Date(payment.periodStart).toLocaleDateString('pt-BR')} à {new Date(payment.periodEnd).toLocaleDateString('pt-BR')}
+                            </p>
+                        </div>
 
-                    <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-2">Forma de Pagamento</label>
-                        <div className="grid grid-cols-2 gap-2">
-                            {[
-                                { value: 'pix', label: 'PIX' },
-                                { value: 'bank_transfer', label: 'Transferência' },
-                                { value: 'cash', label: 'Dinheiro' },
-                                { value: 'check', label: 'Cheque' }
-                            ].map(option => (
-                                <button
-                                    key={option.value}
-                                    onClick={() => setMethod(option.value as any)}
-                                    className={`px-4 py-2 rounded-lg border transition-colors ${method === option.value
-                                        ? 'bg-blue-50 border-blue-500 text-blue-700'
-                                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
-                                        }`}
-                                >
-                                    {option.label}
-                                </button>
-                            ))}
+                        <div className="text-left sm:text-right border-t sm:border-t-0 sm:border-l border-emerald-100/80 pt-2 sm:pt-0 sm:pl-4">
+                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-wider">Valor Total Liquidação</p>
+                            <p className="text-2xl font-black text-emerald-600">
+                                R$ {payment.totalAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
                         </div>
                     </div>
 
+                    {/* Payment Method Selector - 4 COLUMNS GRID */}
                     <div>
-                        <label className="text-sm font-medium text-gray-700 block mb-2">Observações (opcional)</label>
-                        <textarea
-                            value={notes}
-                            onChange={(e) => setNotes(e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            rows={3}
-                            placeholder="Adicionar notas..."
-                        />
+                        <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-2">Forma de Pagamento</label>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                            {paymentMethods.map(option => {
+                                const isSelected = method === option.value;
+                                return (
+                                    <button
+                                        key={option.value}
+                                        type="button"
+                                        onClick={() => setMethod(option.value as any)}
+                                        className={`p-3 rounded-xl border text-xs font-bold text-left transition-all cursor-pointer flex items-center justify-between min-h-[48px] ${isSelected
+                                            ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                                            : option.color
+                                            }`}
+                                    >
+                                        <span className="leading-tight">{option.label}</span>
+                                        {isSelected && <CheckCircle2 className="w-4 h-4 text-white shrink-0 ml-1" />}
+                                    </button>
+                                );
+                            })}
+                        </div>
                     </div>
-                </div>
 
-                <div className="flex gap-3 mt-6">
-                    <button onClick={onCancel} className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-gray-700 hover:bg-gray-50">
-                        Cancelar
-                    </button>
-                    <button
-                        onClick={() => onConfirm(method, notes)}
-                        className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                    >
-                        Confirmar Pagamento
-                    </button>
-                </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {/* Date of Payment */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Data da Efetivação</label>
+                            <input
+                                type="date"
+                                required
+                                value={paymentDate}
+                                onChange={(e) => setPaymentDate(e.target.value)}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-semibold text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                            />
+                        </div>
+
+                        {/* Optional Notes */}
+                        <div>
+                            <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-1.5">Nº do Comprovante / Notas (opcional)</label>
+                            <input
+                                type="text"
+                                value={notes}
+                                onChange={(e) => setNotes(e.target.value)}
+                                className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-xs font-medium text-gray-900 bg-white outline-none focus:ring-2 focus:ring-blue-500 shadow-xs"
+                                placeholder="Ex: PIX TxID 982371982 ou Nº do Cheque"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Buttons */}
+                    <div className="flex justify-end gap-3 pt-2 border-t border-gray-100">
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-5 py-2.5 border border-gray-200 rounded-xl text-xs font-bold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={submitting}
+                            className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                        >
+                            <CheckCircle2 className="w-4 h-4" />
+                            {submitting ? 'Confirmando...' : 'Confirmar Pagamento'}
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     );
