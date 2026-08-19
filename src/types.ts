@@ -305,20 +305,63 @@ export interface Patient {
   phone: string;
   status: 'Active' | 'Inactive';
   plan: Plan;
-  photoUrl?: string; // Novo campo para foto
+  photoUrl?: string; // Foto de perfil
   facialDescriptor?: string; // Biometria facial / descriptor
   lastVisit?: string;
   agreementId?: string; // Vinculo com Convênio
-  // Campos detalhados do prontuário
+
+  // Identificação & Documentação
+  isSocialName?: boolean;
+  socialName?: string;
   cpf?: string;
+  rg?: string;
+  cns?: string;
   birthDate?: string;
+  maritalStatus?: string;
+  gender?: string;
+  profession?: string;
+  companyName?: string;
+  briefDiagnosis?: string;
+
+  // Contato & Preferências
+  email?: string;
+  landlinePhone?: string;
+  contactPreference?: 'whatsapp' | 'email' | 'sms' | 'call';
+  allowReminders?: boolean;
+  reminderChannels?: {
+    whatsapp?: boolean;
+    email?: boolean;
+    sms?: boolean;
+  };
+
+  // Convênio / Saúde
+  insuranceCardNumber?: string;
+  insuranceCardExpiry?: string;
+  insuranceCardHolder?: string;
+
+  // Endereço
+  country?: string;
   cep?: string;
+  state?: string;
+  city?: string;
   street?: string;
   number?: string;
   bairro?: string;
   complement?: string;
   address?: string;
-  city?: string;
+
+  // Responsável Legal / Pediátrico / Dependente
+  hasGuardian?: boolean;
+  guardianName?: string;
+  guardianRelationship?: string;
+  guardianCpf?: string;
+  guardianPhone?: string;
+  guardianEmail?: string;
+  homeCareInstructions?: string;
+
+  // Origem / Captação
+  referralSource?: string;
+  referralDoctor?: string;
 }
 
 export interface Session {
@@ -346,6 +389,42 @@ export interface Session {
   repeatWeekly?: boolean;
 }
 
+// --- Mapeamento de Pontos de Dor no Corpo Humano (Body Pain Map) ---
+export interface PainPoint {
+  id: string;
+  view: 'front' | 'back' | 'left' | 'right';
+  x: number; // Porcentagem X (0 a 100)
+  y: number; // Porcentagem Y (0 a 100)
+  intensity: number; // Escala EVA 0 a 10
+  label?: string; // Ex: Trapézio Direito, Lombar
+  note?: string; // Ex: Queimação, Pontada, Tensão
+}
+
+// --- Templates Clínicos Customizados (Evolução & Avaliação) ---
+export interface ClinicalTemplateSection {
+  id: string;
+  title: string;
+  type: 'checkbox_text' | 'text' | 'textarea' | 'pain_map' | 'file_upload' | 'image_upload' | 'select';
+  checked?: boolean; // Para checkbox_text
+  value?: string;
+  options?: string[];
+  placeholder?: string;
+  required?: boolean;
+}
+
+export interface ClinicalTemplate {
+  id: string;
+  type: 'evolution' | 'evaluation';
+  category: 'standard' | 'restricted' | 'custom';
+  professionalId?: string;
+  title: string;
+  description?: string;
+  sections: ClinicalTemplateSection[];
+  isSystem?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // --- Módulo Clínico: Avaliações & Anamneses ---
 export interface PatientEvaluation {
   id: string;
@@ -364,6 +443,10 @@ export interface PatientEvaluation {
   treatmentGoals?: string; // Objetivos do tratamento
   treatmentPlan?: string; // Conduta proposta
   attachments?: string[]; // URLs de exames ou fotos
+  images?: string[]; // Fotos comparativas posturais
+  painPoints?: PainPoint[]; // Mapa anatômico de pontos de dor
+  templateId?: string; // Template utilizado
+  templateData?: Record<string, any>; // Dados dinâmicos preenchidos do template
   createdAt?: string;
   updatedAt?: string;
   // Campos populados
@@ -385,6 +468,9 @@ export interface PatientEvolution {
   conduct: string; // Conduta / Procedimentos realizados
   patientResponse?: string; // Relato subjetivo / Resposta do paciente
   nextSteps?: string; // Orientações / Próxima sessão
+  painPoints?: PainPoint[]; // Mapa anatômico de pontos de dor
+  templateId?: string; // Template utilizado
+  templateData?: Record<string, any>; // Dados dos 10 blocos de checkbox e relatos
   isLocked?: boolean;
   createdAt?: string;
   updatedAt?: string;

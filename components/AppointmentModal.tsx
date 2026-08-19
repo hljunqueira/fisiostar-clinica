@@ -496,19 +496,33 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
                   </p>
                 </div>
               ) : (
-                <select
-                  required={!isBlockingMode}
-                  value={selectedPatientId}
-                  onChange={(e) => setSelectedPatientId(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-                >
-                  <option value="">Selecione o paciente...</option>
-                  {patients.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} {p.cpf ? `(CPF: ${p.cpf})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <>
+                  <select
+                    required={!isBlockingMode}
+                    value={selectedPatientId}
+                    onChange={(e) => setSelectedPatientId(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  >
+                    <option value="">Selecione o paciente...</option>
+                    {patients.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} {p.cpf ? `(CPF: ${p.cpf})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedPatientId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onClose();
+                        navigate(`/pacientes?patientId=${selectedPatientId}&tab=timeline`);
+                      }}
+                      className="text-[11px] text-blue-600 font-bold hover:text-blue-800 hover:underline mt-1 inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Ver Prontuário & Linha do Tempo de {patients.find(p => p.id === selectedPatientId)?.name || 'Paciente'} →</span>
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}

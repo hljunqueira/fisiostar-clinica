@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 
-type StorageBucket = 'avatars' | 'patient-photos' | 'signatures';
+type StorageBucket = 'avatars' | 'patient-photos' | 'signatures' | 'documents' | 'clinical-files';
 
 export const storageApi = {
     /**

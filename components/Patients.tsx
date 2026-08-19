@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, Filter, MoreHorizontal, UserPlus, FileText, X, Camera, FileSignature, CheckCircle, Clock, UploadCloud, User, Printer, Check, Phone as PhoneIcon, CreditCard, Save, MapPin, Calendar, Calendar as CalendarIcon, Hash, Edit2, Trash2, XCircle, DollarSign, Sparkles, LayoutGrid, List, ChevronLeft, ChevronRight, Stethoscope, Activity, Scan } from 'lucide-react';
 import { FacialScanModal } from './FacialScanModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -242,6 +243,14 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
 
     const activePlans = planTemplates.filter(p => p.active);
 
+    // Guardian / Pediatric Info
+    const [hasGuardian, setHasGuardian] = useState(initialData?.hasGuardian || false);
+    const [guardianName, setGuardianName] = useState(initialData?.guardianName || '');
+    const [guardianRelationship, setGuardianRelationship] = useState(initialData?.guardianRelationship || 'Mãe');
+    const [guardianPhone, setGuardianPhone] = useState(initialData?.guardianPhone || '');
+    const [guardianCpf, setGuardianCpf] = useState(initialData?.guardianCpf || '');
+    const [guardianEmail, setGuardianEmail] = useState(initialData?.guardianEmail || '');
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -295,6 +304,13 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
             complement: complement || undefined,
             address: formattedAddress || initialData?.address,
             city: city || undefined,
+
+            hasGuardian,
+            guardianName: guardianName.trim() || undefined,
+            guardianRelationship: guardianRelationship || undefined,
+            guardianPhone: guardianPhone.trim() || undefined,
+            guardianCpf: guardianCpf.trim() || undefined,
+            guardianEmail: guardianEmail.trim() || undefined,
 
             unitId: selectedUnitId || (currentUnit === 'ALL' ? allUnits[0]?.id : currentUnit),
             status: initialData?.status || 'Active',
@@ -544,6 +560,92 @@ const CreatePatientModal = ({ onClose, onSave, currentUnit, planTemplates, initi
                         </div>
                     </div>
 
+                    {/* Section: Responsável Legal (Pediátrico / Dependente) */}
+                    <div>
+                        <div className="flex items-center justify-between mb-4 border-b border-gray-100 pb-2">
+                            <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+                                <User className="w-4 h-4 text-indigo-600" />
+                                Responsável Legal (Criança / Dependente)
+                            </h3>
+                            <label className="inline-flex items-center gap-2 text-xs font-semibold text-indigo-600 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={hasGuardian}
+                                    onChange={e => setHasGuardian(e.target.checked)}
+                                    className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                                />
+                                <span>Paciente menor de idade / Dependente</span>
+                            </label>
+                        </div>
+
+                        {hasGuardian && (
+                            <div className="bg-indigo-50/40 p-4 rounded-xl border border-indigo-100 space-y-4">
+                                <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                                    <div className="md:col-span-6">
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Nome do Responsável *</label>
+                                        <input
+                                            type="text"
+                                            value={guardianName}
+                                            onChange={e => setGuardianName(e.target.value)}
+                                            placeholder="Ex: Maria Rodrigues da Silva"
+                                            className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+
+                                    <div className="md:col-span-3">
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Parentesco</label>
+                                        <select
+                                            value={guardianRelationship}
+                                            onChange={e => setGuardianRelationship(e.target.value)}
+                                            className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500"
+                                        >
+                                            <option value="Mãe">Mãe</option>
+                                            <option value="Pai">Pai</option>
+                                            <option value="Avó/Avô">Avó / Avô</option>
+                                            <option value="Tutor Legal">Tutor Legal</option>
+                                            <option value="Cuidador">Cuidador</option>
+                                            <option value="Outro">Outro</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="md:col-span-3">
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">WhatsApp do Responsável</label>
+                                        <input
+                                            type="text"
+                                            value={guardianPhone}
+                                            onChange={e => setGuardianPhone(maskPhone(e.target.value))}
+                                            placeholder="(00) 90000-0000"
+                                            className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+
+                                    <div className="md:col-span-6">
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">CPF do Responsável</label>
+                                        <input
+                                            type="text"
+                                            maxLength={14}
+                                            value={guardianCpf}
+                                            onChange={e => setGuardianCpf(maskCpf(e.target.value))}
+                                            placeholder="000.000.000-00"
+                                            className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+
+                                    <div className="md:col-span-6">
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">E-mail do Responsável</label>
+                                        <input
+                                            type="email"
+                                            value={guardianEmail}
+                                            onChange={e => setGuardianEmail(e.target.value)}
+                                            placeholder="responsavel@email.com"
+                                            className="w-full px-3.5 py-2.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Section 3: Plano */}
                     <div>
                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4 border-b border-gray-100 pb-2 flex items-center gap-2">
@@ -614,6 +716,7 @@ const getWhatsappUrl = (phone?: string) => {
 
 const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
     const { user } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [searchTerm, setSearchTerm] = useState('');
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
@@ -627,6 +730,17 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
     const [loading, setLoading] = useState(true);
     const [unitName, setUnitName] = useState('');
     const [allUnits, setAllUnits] = useState<Unit[]>([]);
+
+    // Sincroniza seleção automática se houver patientId na URL
+    useEffect(() => {
+        const pId = searchParams.get('patientId');
+        if (pId && patientsList.length > 0) {
+            const found = patientsList.find(p => p.id === pId);
+            if (found) {
+                setSelectedPatient(found);
+            }
+        }
+    }, [searchParams, patientsList]);
 
     useEffect(() => {
         loadData();
@@ -811,7 +925,11 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
             <div className="space-y-6">
                 <PatientDetailView
                     patient={selectedPatient}
-                    onClose={() => setSelectedPatient(null)}
+                    initialTab={(searchParams.get('tab') as any) || 'timeline'}
+                    onClose={() => {
+                        setSelectedPatient(null);
+                        setSearchParams({});
+                    }}
                     currentUnit={currentUnit}
                     professionals={professionals}
                     units={allUnits}

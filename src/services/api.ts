@@ -4,7 +4,7 @@ import type {
     PlanTemplate, Announcement, SystemUser, SessionStatus,
     DaySchedule, Holiday, PermissionKey, AuditLogItem, AuditCategory,
     Agreement, PatientEvaluation, PatientEvolution, PatientEvolutionAudit,
-    ContractTemplate, PatientContract
+    ContractTemplate, PatientContract, ClinicalTemplate, PainPoint
 } from '../types';
 
 export interface SystemNotification {
@@ -348,59 +348,130 @@ export const professionalsApi = {
 // PATIENTS API
 // =====================================================
 
+const mapPatientFromDb = (p: any): Patient => ({
+    id: p.id,
+    name: p.name,
+    unitId: p.unit_id,
+    phone: p.phone || '',
+    cpf: p.cpf || undefined,
+    rg: p.rg || undefined,
+    cns: p.cns || undefined,
+    birthDate: p.birth_date || undefined,
+    isSocialName: p.is_social_name || false,
+    socialName: p.social_name || undefined,
+    maritalStatus: p.marital_status || undefined,
+    gender: p.gender || undefined,
+    profession: p.profession || undefined,
+    companyName: p.company_name || undefined,
+    briefDiagnosis: p.brief_diagnosis || undefined,
+    email: p.email || undefined,
+    landlinePhone: p.landline_phone || undefined,
+    contactPreference: p.contact_preference || 'whatsapp',
+    allowReminders: p.allow_reminders !== undefined ? p.allow_reminders : true,
+    reminderChannels: p.reminder_channels || { whatsapp: true, email: true, sms: false },
+    insuranceCardNumber: p.insurance_card_number || undefined,
+    insuranceCardExpiry: p.insurance_card_expiry || undefined,
+    insuranceCardHolder: p.insurance_card_holder || undefined,
+    country: p.country || 'Brasil',
+    cep: p.cep || undefined,
+    state: p.state || undefined,
+    city: p.city || undefined,
+    street: p.street || undefined,
+    number: p.number || undefined,
+    bairro: p.bairro || undefined,
+    complement: p.complement || undefined,
+    address: p.address || (p.street ? `${p.street}${p.number ? ', ' + p.number : ''}` : undefined),
+    status: p.status || 'Active',
+    photoUrl: p.photo_url || undefined,
+    facialDescriptor: p.facial_descriptor || undefined,
+    lastVisit: p.last_visit || undefined,
+    agreementId: p.agreement_id || undefined,
+    hasGuardian: p.has_guardian || false,
+    guardianName: p.guardian_name || undefined,
+    guardianRelationship: p.guardian_relationship || undefined,
+    guardianCpf: p.guardian_cpf || undefined,
+    guardianPhone: p.guardian_phone || undefined,
+    guardianEmail: p.guardian_email || undefined,
+    homeCareInstructions: p.home_care_instructions || undefined,
+    referralSource: p.referral_source || undefined,
+    referralDoctor: p.referral_doctor || undefined,
+    plan: p.patient_plans?.[0] ? {
+        name: p.patient_plans[0].name,
+        totalSessions: p.patient_plans[0].total_sessions,
+        remainingSessions: p.patient_plans[0].remaining_sessions,
+        expiresAt: p.patient_plans[0].expires_at,
+        totalPaid: p.patient_plans[0].total_paid,
+        paymentStatus: p.patient_plans[0].payment_status,
+        paymentDate: p.patient_plans[0].payment_date,
+        paymentMethod: p.patient_plans[0].payment_method
+    } : undefined
+});
+
 export const patientsApi = {
     async getAll(): Promise<Patient[]> {
         const { data: patients, error } = await supabase
             .from('patients')
-            .select('*, patient_plans(*)');
+            .select('*, patient_plans(*)')
+            .order('name', { ascending: true });
 
         if (error) throw error;
 
-        return patients.map(patient => ({
-            id: patient.id,
-            name: patient.name,
-            unitId: patient.unit_id,
-            phone: patient.phone,
-            cpf: patient.cpf,
-            birthDate: patient.birth_date,
-            address: patient.address,
-            city: patient.city,
-            status: patient.status,
-            photoUrl: patient.photo_url,
-            facialDescriptor: patient.facial_descriptor,
-            lastVisit: patient.last_visit,
-            agreementId: patient.agreement_id,
-            plan: patient.patient_plans?.[0] ? {
-                name: patient.patient_plans[0].name,
-                totalSessions: patient.patient_plans[0].total_sessions,
-                remainingSessions: patient.patient_plans[0].remaining_sessions,
-                expiresAt: patient.patient_plans[0].expires_at,
-                totalPaid: patient.patient_plans[0].total_paid,
-                paymentStatus: patient.patient_plans[0].payment_status,
-                paymentDate: patient.patient_plans[0].payment_date,
-                paymentMethod: patient.patient_plans[0].payment_method
-            } : undefined
-        }));
+        return (patients || []).map(mapPatientFromDb);
     },
 
     async create(patient: Omit<Patient, 'id'>): Promise<Patient> {
+        const insertData: any = {
+            name: patient.name,
+            unit_id: patient.unitId || null,
+            phone: patient.phone || null,
+            cpf: patient.cpf || null,
+            rg: patient.rg || null,
+            cns: patient.cns || null,
+            birth_date: patient.birthDate || null,
+            is_social_name: patient.isSocialName || false,
+            social_name: patient.socialName || null,
+            marital_status: patient.maritalStatus || null,
+            gender: patient.gender || null,
+            profession: patient.profession || null,
+            company_name: patient.companyName || null,
+            brief_diagnosis: patient.briefDiagnosis || null,
+            email: patient.email || null,
+            landline_phone: patient.landlinePhone || null,
+            contact_preference: patient.contactPreference || 'whatsapp',
+            allow_reminders: patient.allowReminders !== undefined ? patient.allowReminders : true,
+            reminder_channels: patient.reminderChannels || { whatsapp: true, email: true, sms: false },
+            insurance_card_number: patient.insuranceCardNumber || null,
+            insurance_card_expiry: patient.insuranceCardExpiry || null,
+            insurance_card_holder: patient.insuranceCardHolder || null,
+            country: patient.country || 'Brasil',
+            cep: patient.cep || null,
+            state: patient.state || null,
+            city: patient.city || null,
+            street: patient.street || null,
+            number: patient.number || null,
+            bairro: patient.bairro || null,
+            complement: patient.complement || null,
+            address: patient.address || (patient.street ? `${patient.street}${patient.number ? ', ' + patient.number : ''}` : null),
+            status: patient.status || 'Active',
+            photo_url: patient.photoUrl || null,
+            facial_descriptor: patient.facialDescriptor || null,
+            last_visit: patient.lastVisit || null,
+            agreement_id: patient.agreementId || null,
+            has_guardian: patient.hasGuardian || false,
+            guardian_name: patient.guardianName || null,
+            guardian_relationship: patient.guardianRelationship || null,
+            guardian_cpf: patient.guardianCpf || null,
+            guardian_phone: patient.guardianPhone || null,
+            guardian_email: patient.guardianEmail || null,
+            home_care_instructions: patient.homeCareInstructions || null,
+            referral_source: patient.referralSource || null,
+            referral_doctor: patient.referralDoctor || null
+        };
+
         const { data, error } = await supabase
             .from('patients')
-            .insert({
-                name: patient.name,
-                unit_id: patient.unitId || null,
-                phone: patient.phone || null,
-                cpf: patient.cpf || null,
-                birth_date: patient.birthDate || null,
-                address: patient.address || null,
-                city: patient.city || null,
-                status: patient.status || 'Active',
-                photo_url: patient.photoUrl || null,
-                facial_descriptor: patient.facialDescriptor || null,
-                last_visit: patient.lastVisit || null,
-                agreement_id: patient.agreementId || null
-            })
-            .select()
+            .insert(insertData)
+            .select('*, patient_plans(*)')
             .single();
 
         if (error) throw error;
@@ -424,22 +495,7 @@ export const patientsApi = {
             }
         }
 
-        return {
-            id: data.id,
-            name: data.name,
-            unitId: data.unit_id,
-            phone: data.phone || '',
-            cpf: data.cpf || undefined,
-            birthDate: data.birth_date || undefined,
-            address: data.address || undefined,
-            city: data.city || undefined,
-            status: data.status,
-            photoUrl: data.photo_url || undefined,
-            facialDescriptor: data.facial_descriptor || undefined,
-            lastVisit: data.last_visit || undefined,
-            agreementId: data.agreement_id || undefined,
-            plan: patient.plan
-        };
+        return this.getById(data.id);
     },
 
     async getById(id: string): Promise<Patient> {
@@ -451,31 +507,7 @@ export const patientsApi = {
 
         if (error || !patient) throw error || new Error('Patient not found');
 
-        return {
-            id: patient.id,
-            name: patient.name,
-            unitId: patient.unit_id,
-            phone: patient.phone || '',
-            cpf: patient.cpf || undefined,
-            birthDate: patient.birth_date || undefined,
-            address: patient.address || undefined,
-            city: patient.city || undefined,
-            status: patient.status,
-            photoUrl: patient.photo_url || undefined,
-            facialDescriptor: patient.facial_descriptor || undefined,
-            lastVisit: patient.last_visit || undefined,
-            agreementId: patient.agreement_id || undefined,
-            plan: patient.patient_plans?.[0] ? {
-                name: patient.patient_plans[0].name,
-                totalSessions: patient.patient_plans[0].total_sessions,
-                remainingSessions: patient.patient_plans[0].remaining_sessions,
-                expiresAt: patient.patient_plans[0].expires_at,
-                totalPaid: patient.patient_plans[0].total_paid,
-                paymentStatus: patient.patient_plans[0].payment_status,
-                paymentDate: patient.patient_plans[0].payment_date,
-                paymentMethod: patient.patient_plans[0].payment_method
-            } : undefined
-        };
+        return mapPatientFromDb(patient);
     },
 
     async update(id: string, updates: Partial<Patient>): Promise<Patient> {
@@ -484,21 +516,56 @@ export const patientsApi = {
         if (updates.unitId !== undefined) updateData.unit_id = updates.unitId || null;
         if (updates.phone !== undefined) updateData.phone = updates.phone || null;
         if (updates.cpf !== undefined) updateData.cpf = updates.cpf || null;
+        if (updates.rg !== undefined) updateData.rg = updates.rg || null;
+        if (updates.cns !== undefined) updateData.cns = updates.cns || null;
         if (updates.birthDate !== undefined) updateData.birth_date = updates.birthDate || null;
-        if (updates.address !== undefined) updateData.address = updates.address || null;
+        if (updates.isSocialName !== undefined) updateData.is_social_name = updates.isSocialName;
+        if (updates.socialName !== undefined) updateData.social_name = updates.socialName || null;
+        if (updates.maritalStatus !== undefined) updateData.marital_status = updates.maritalStatus || null;
+        if (updates.gender !== undefined) updateData.gender = updates.gender || null;
+        if (updates.profession !== undefined) updateData.profession = updates.profession || null;
+        if (updates.companyName !== undefined) updateData.company_name = updates.companyName || null;
+        if (updates.briefDiagnosis !== undefined) updateData.brief_diagnosis = updates.briefDiagnosis || null;
+        if (updates.email !== undefined) updateData.email = updates.email || null;
+        if (updates.landlinePhone !== undefined) updateData.landline_phone = updates.landlinePhone || null;
+        if (updates.contactPreference !== undefined) updateData.contact_preference = updates.contactPreference || 'whatsapp';
+        if (updates.allowReminders !== undefined) updateData.allow_reminders = updates.allowReminders;
+        if (updates.reminderChannels !== undefined) updateData.reminder_channels = updates.reminderChannels;
+        if (updates.insuranceCardNumber !== undefined) updateData.insurance_card_number = updates.insuranceCardNumber || null;
+        if (updates.insuranceCardExpiry !== undefined) updateData.insurance_card_expiry = updates.insuranceCardExpiry || null;
+        if (updates.insuranceCardHolder !== undefined) updateData.insurance_card_holder = updates.insuranceCardHolder || null;
+        if (updates.country !== undefined) updateData.country = updates.country || 'Brasil';
+        if (updates.cep !== undefined) updateData.cep = updates.cep || null;
+        if (updates.state !== undefined) updateData.state = updates.state || null;
         if (updates.city !== undefined) updateData.city = updates.city || null;
+        if (updates.street !== undefined) updateData.street = updates.street || null;
+        if (updates.number !== undefined) updateData.number = updates.number || null;
+        if (updates.bairro !== undefined) updateData.bairro = updates.bairro || null;
+        if (updates.complement !== undefined) updateData.complement = updates.complement || null;
+        if (updates.address !== undefined) updateData.address = updates.address || null;
         if (updates.status !== undefined) updateData.status = updates.status;
         if (updates.photoUrl !== undefined) updateData.photo_url = updates.photoUrl || null;
         if (updates.facialDescriptor !== undefined) updateData.facial_descriptor = updates.facialDescriptor || null;
         if (updates.lastVisit !== undefined) updateData.last_visit = updates.lastVisit || null;
         if (updates.agreementId !== undefined) updateData.agreement_id = updates.agreementId || null;
+        if (updates.hasGuardian !== undefined) updateData.has_guardian = updates.hasGuardian;
+        if (updates.guardianName !== undefined) updateData.guardian_name = updates.guardianName || null;
+        if (updates.guardianRelationship !== undefined) updateData.guardian_relationship = updates.guardianRelationship || null;
+        if (updates.guardianCpf !== undefined) updateData.guardian_cpf = updates.guardianCpf || null;
+        if (updates.guardianPhone !== undefined) updateData.guardian_phone = updates.guardianPhone || null;
+        if (updates.guardianEmail !== undefined) updateData.guardian_email = updates.guardianEmail || null;
+        if (updates.homeCareInstructions !== undefined) updateData.home_care_instructions = updates.homeCareInstructions || null;
+        if (updates.referralSource !== undefined) updateData.referral_source = updates.referralSource || null;
+        if (updates.referralDoctor !== undefined) updateData.referral_doctor = updates.referralDoctor || null;
 
-        const { error } = await supabase
-            .from('patients')
-            .update(updateData)
-            .eq('id', id);
+        if (Object.keys(updateData).length > 0) {
+            const { error } = await supabase
+                .from('patients')
+                .update(updateData)
+                .eq('id', id);
 
-        if (error) throw error;
+            if (error) throw error;
+        }
 
         // Update plan if provided
         if (updates.plan) {
@@ -1375,6 +1442,132 @@ export const agreementsApi = {
 
 
 // =====================================================
+// CLINICAL TEMPLATES API (Modelos de Evolução e Avaliação)
+// =====================================================
+export const clinicalTemplatesApi = {
+    async getAll(): Promise<ClinicalTemplate[]> {
+        const { data, error } = await supabase
+            .from('clinical_templates')
+            .select('*')
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        return (data || []).map(t => ({
+            id: t.id,
+            type: t.type,
+            category: t.category,
+            professionalId: t.professional_id,
+            title: t.title,
+            description: t.description,
+            sections: t.sections || [],
+            isSystem: t.is_system,
+            createdAt: t.created_at,
+            updatedAt: t.updated_at
+        }));
+    },
+
+    async getByType(type: 'evolution' | 'evaluation', professionalId?: string): Promise<ClinicalTemplate[]> {
+        let query = supabase
+            .from('clinical_templates')
+            .select('*')
+            .eq('type', type);
+
+        if (professionalId) {
+            query = query.or(`is_system.eq.true,professional_id.eq.${professionalId}`);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: true });
+
+        if (error) throw error;
+
+        return (data || []).map(t => ({
+            id: t.id,
+            type: t.type,
+            category: t.category,
+            professionalId: t.professional_id,
+            title: t.title,
+            description: t.description,
+            sections: t.sections || [],
+            isSystem: t.is_system,
+            createdAt: t.created_at,
+            updatedAt: t.updated_at
+        }));
+    },
+
+    async create(template: Omit<ClinicalTemplate, 'id' | 'createdAt' | 'updatedAt'>): Promise<ClinicalTemplate> {
+        const { data, error } = await supabase
+            .from('clinical_templates')
+            .insert({
+                type: template.type,
+                category: template.category || 'custom',
+                professional_id: template.professionalId || null,
+                title: template.title,
+                description: template.description || null,
+                sections: template.sections || [],
+                is_system: template.isSystem || false
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return {
+            id: data.id,
+            type: data.type,
+            category: data.category,
+            professionalId: data.professional_id,
+            title: data.title,
+            description: data.description,
+            sections: data.sections || [],
+            isSystem: data.is_system,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
+    },
+
+    async update(id: string, updates: Partial<ClinicalTemplate>): Promise<ClinicalTemplate> {
+        const updateData: any = {};
+        if (updates.title !== undefined) updateData.title = updates.title;
+        if (updates.description !== undefined) updateData.description = updates.description;
+        if (updates.sections !== undefined) updateData.sections = updates.sections;
+        if (updates.category !== undefined) updateData.category = updates.category;
+        updateData.updated_at = new Date().toISOString();
+
+        const { data, error } = await supabase
+            .from('clinical_templates')
+            .update(updateData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return {
+            id: data.id,
+            type: data.type,
+            category: data.category,
+            professionalId: data.professional_id,
+            title: data.title,
+            description: data.description,
+            sections: data.sections || [],
+            isSystem: data.is_system,
+            createdAt: data.created_at,
+            updatedAt: data.updated_at
+        };
+    },
+
+    async delete(id: string): Promise<void> {
+        const { error } = await supabase
+            .from('clinical_templates')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+    }
+};
+
+// =====================================================
 // EVALUATIONS API (Avaliações Clínicas / Anamneses)
 // =====================================================
 export const evaluationsApi = {
@@ -1403,6 +1596,10 @@ export const evaluationsApi = {
             treatmentGoals: e.treatment_goals,
             treatmentPlan: e.treatment_plan,
             attachments: e.attachments || [],
+            images: e.images || [],
+            painPoints: e.pain_points || [],
+            templateId: e.template_id,
+            templateData: e.template_data || {},
             createdAt: e.created_at,
             updatedAt: e.updated_at,
             patientName: e.patients?.name,
@@ -1437,6 +1634,10 @@ export const evaluationsApi = {
             treatmentGoals: e.treatment_goals,
             treatmentPlan: e.treatment_plan,
             attachments: e.attachments || [],
+            images: e.images || [],
+            painPoints: e.pain_points || [],
+            templateId: e.template_id,
+            templateData: e.template_data || {},
             createdAt: e.created_at,
             updatedAt: e.updated_at,
             patientName: e.patients?.name,
@@ -1471,6 +1672,10 @@ export const evaluationsApi = {
             treatmentGoals: data.treatment_goals,
             treatmentPlan: data.treatment_plan,
             attachments: data.attachments || [],
+            images: data.images || [],
+            painPoints: data.pain_points || [],
+            templateId: data.template_id,
+            templateData: data.template_data || {},
             createdAt: data.created_at,
             updatedAt: data.updated_at,
             patientName: data.patients?.name,
@@ -1497,7 +1702,11 @@ export const evaluationsApi = {
                 clinical_diagnosis: evaluation.clinicalDiagnosis || null,
                 treatment_goals: evaluation.treatmentGoals || null,
                 treatment_plan: evaluation.treatmentPlan || null,
-                attachments: evaluation.attachments || []
+                attachments: evaluation.attachments || [],
+                images: evaluation.images || [],
+                pain_points: evaluation.painPoints || [],
+                template_id: evaluation.templateId || null,
+                template_data: evaluation.templateData || {}
             })
             .select()
             .single();
@@ -1519,6 +1728,10 @@ export const evaluationsApi = {
         if (updates.treatmentGoals !== undefined) updateData.treatment_goals = updates.treatmentGoals;
         if (updates.treatmentPlan !== undefined) updateData.treatment_plan = updates.treatmentPlan;
         if (updates.attachments !== undefined) updateData.attachments = updates.attachments;
+        if (updates.images !== undefined) updateData.images = updates.images;
+        if (updates.painPoints !== undefined) updateData.pain_points = updates.painPoints;
+        if (updates.templateId !== undefined) updateData.template_id = updates.templateId;
+        if (updates.templateData !== undefined) updateData.template_data = updates.templateData;
         updateData.updated_at = new Date().toISOString();
 
         const { error } = await supabase
@@ -1541,7 +1754,7 @@ export const evaluationsApi = {
 };
 
 // =====================================================
-// EVOLUTIONS API (Evoluções Diárias SOAPE)
+// EVOLUTIONS API (Evoluções Diárias SOAPE & Condutas)
 // =====================================================
 export const evolutionsApi = {
     async getAll(): Promise<PatientEvolution[]> {
@@ -1565,6 +1778,9 @@ export const evolutionsApi = {
             conduct: e.conduct,
             patientResponse: e.patient_response,
             nextSteps: e.next_steps,
+            painPoints: e.pain_points || [],
+            templateId: e.template_id,
+            templateData: e.template_data || {},
             isLocked: e.is_locked,
             createdAt: e.created_at,
             updatedAt: e.updated_at,
@@ -1596,6 +1812,9 @@ export const evolutionsApi = {
             conduct: e.conduct,
             patientResponse: e.patient_response,
             nextSteps: e.next_steps,
+            painPoints: e.pain_points || [],
+            templateId: e.template_id,
+            templateData: e.template_data || {},
             isLocked: e.is_locked,
             createdAt: e.created_at,
             updatedAt: e.updated_at,
@@ -1627,6 +1846,9 @@ export const evolutionsApi = {
             conduct: data.conduct,
             patientResponse: data.patient_response,
             nextSteps: data.next_steps,
+            painPoints: data.pain_points || [],
+            templateId: data.template_id,
+            templateData: data.template_data || {},
             isLocked: data.is_locked,
             createdAt: data.created_at,
             updatedAt: data.updated_at,
@@ -1683,7 +1905,10 @@ export const evolutionsApi = {
                 pain_level: evolution.painLevel !== undefined ? evolution.painLevel : null,
                 conduct: evolution.conduct,
                 patient_response: evolution.patientResponse || null,
-                next_steps: evolution.nextSteps || null
+                next_steps: evolution.nextSteps || null,
+                pain_points: evolution.painPoints || [],
+                template_id: evolution.templateId || null,
+                template_data: evolution.templateData || {}
             })
             .select()
             .single();
@@ -1701,6 +1926,9 @@ export const evolutionsApi = {
         if (updates.conduct !== undefined) updateData.conduct = updates.conduct;
         if (updates.patientResponse !== undefined) updateData.patient_response = updates.patientResponse;
         if (updates.nextSteps !== undefined) updateData.next_steps = updates.nextSteps;
+        if (updates.painPoints !== undefined) updateData.pain_points = updates.painPoints;
+        if (updates.templateId !== undefined) updateData.template_id = updates.templateId;
+        if (updates.templateData !== undefined) updateData.template_data = updates.templateData;
         updateData.updated_at = new Date().toISOString();
 
         const { error } = await supabase

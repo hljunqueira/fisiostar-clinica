@@ -29,8 +29,16 @@ dist-ssr
 *.tar.gz
 *.zip
 *.xlsx
+*.pdf
 
 # Deploy Scripts & Local Agent Memory
 deploy-fisiostar.ps1
 deploy-fisiostar.sh
 .agents/MEMORY.md
+
+# Diagnostic scripts
+*.ps1
+
+# Mockup root source files
+/mockup-muscular.webp
+/mockup-muscular1-removebg-preview.png

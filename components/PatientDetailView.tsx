@@ -1,14 +1,16 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
     Clock, Stethoscope, Activity, ShieldCheck, CreditCard, User, 
     Printer, Phone as PhoneIcon, Edit2, Trash2, XCircle, CheckCircle, 
     UploadCloud, Camera, ChevronLeft, Plus, FileText, AlertCircle, 
     Calendar as CalendarIcon, FileSignature, Check, MapPin, Hash, Sparkles, X,
-    RefreshCw, DollarSign, Save
+    RefreshCw, DollarSign, Save, Search, Filter, ArrowUpDown, Share2, Heart,
+    Baby, Home, Download
 } from 'lucide-react';
-import { UnitId, Patient, SessionStatus, Professional, Session, Unit, PatientEvaluation, PatientEvolution, PatientContract, PlanTemplate } from '../types';
-import { patientsApi, sessionsApi, unitsApi, evaluationsApi, evolutionsApi, contractsApi, planTemplatesApi } from '../src/services/api';
-import { maskPhone, maskCpf, maskCep, validateCpf } from '../src/utils/masks';
+import { UnitId, Patient, SessionStatus, Professional, Session, Unit, PatientEvaluation, PatientEvolution, PatientContract, PlanTemplate, Agreement } from '../types';
+import { patientsApi, sessionsApi, unitsApi, evaluationsApi, evolutionsApi, contractsApi, planTemplatesApi, agreementsApi } from '../src/services/api';
+import { maskPhone, maskCpf, maskCep, validateCpf, formatPhone } from '../src/utils/masks';
 import { storageApi } from '../src/services/storage-api';
 import { EvaluationModal } from './EvaluationModal';
 import { EvolutionModal } from './EvolutionModal';
@@ -24,6 +26,7 @@ interface PatientDetailViewProps {
     currentUnit: UnitId;
     professionals: Professional[];
     units: Unit[];
+    initialTab?: 'timeline' | 'evaluations' | 'evolutions' | 'contracts' | 'financial' | 'info' | 'guardian';
     onOpenFacialScan?: (patient: Patient) => void;
     onEdit?: (patient: Patient) => void;
     onToggleStatus?: (patient: Patient) => void;
@@ -32,12 +35,13 @@ interface PatientDetailViewProps {
     onRequestConfirm?: (config: { title: string; description: string; confirmLabel?: string; variant?: 'danger' | 'warning' | 'info'; onConfirm: () => void }) => void;
 }
 
-const getWhatsappUrl = (phone?: string) => {
+const getWhatsappUrl = (phone?: string, text?: string) => {
     if (!phone) return '#';
     const cleanPhone = phone.replace(/\D/g, '');
     if (!cleanPhone) return '#';
     const finalPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-    return `https://wa.me/${finalPhone}?text=${encodeURIComponent('Olá! Entro em contato da clínica FisioStar.')}`;
+    const message = text || 'Olá! Entro em contato da clínica FisioStar.';
+    return `https://wa.me/${finalPhone}?text=${encodeURIComponent(message)}`;
 };
 
 export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
@@ -46,15 +50,18 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
     currentUnit,
     professionals,
     units,
+    initialTab = 'timeline',
     onOpenFacialScan,
     onToggleStatus,
     onDelete,
     onUpdatePatient,
     onRequestConfirm
 }) => {
+    const navigate = useNavigate();
     const [patient, setPatient] = useState<Patient>(initialPatient);
     const [unitName, setUnitName] = useState('');
     const { systemUser } = useAuth();
+    const [agreements, setAgreements] = useState<Agreement[]>([]);
 
     useEffect(() => {
         setPatient(initialPatient);
@@ -67,19 +74,19 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
         } else {
             unitsApi.getById(currentUnit).then(u => setUnitName(u.name)).catch(() => setUnitName('FisioStar'));
         }
+        agreementsApi.getAll().then(setAgreements).catch(() => {});
     }, [currentUnit, patient.unitId, units]);
 
-    const [activeTab, setActiveTab] = useState<'signatures' | 'evaluations' | 'evolutions' | 'contracts' | 'financial' | 'info'>('signatures');
-    const [isScheduling, setIsScheduling] = useState(false);
-    const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-    const [newProfessionalId, setNewProfessionalId] = useState('');
-
+    const [activeTab, setActiveTab] = useState<'timeline' | 'evaluations' | 'evolutions' | 'contracts' | 'financial' | 'info' | 'guardian'>(initialTab);
+    
     // Clinical Records State
     const [evaluations, setEvaluations] = useState<PatientEvaluation[]>([]);
     const [evolutions, setEvolutions] = useState<PatientEvolution[]>([]);
     const [contracts, setContracts] = useState<PatientContract[]>([]);
     const [planTemplates, setPlanTemplates] = useState<PlanTemplate[]>([]);
+    const [patientHistory, setPatientHistory] = useState<Session[]>([]);
     const [loadingClinical, setLoadingClinical] = useState(false);
+    const [loadingHistory, setLoadingHistory] = useState(true);
 
     // Modals state
     const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
@@ -89,6 +96,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
     const [isContractModalOpen, setIsContractModalOpen] = useState(false);
     const [selectedContractToView, setSelectedContractToView] = useState<PatientContract | null>(null);
     const [isDocGenModalOpen, setIsDocGenModalOpen] = useState(false);
+    const [showSignatureModal, setShowSignatureModal] = useState(false);
+    const [sessionToSign, setSessionToSign] = useState<string | null>(null);
 
     // Modal de Vincular / Trocar Plano
     const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
@@ -102,30 +111,71 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
     const [planExpiryDays, setPlanExpiryDays] = useState(60);
     const [savingPlan, setSavingPlan] = useState(false);
 
+    // Timeline Filters State
+    const [timelineCategory, setTimelineCategory] = useState<'all' | 'sessions' | 'evolutions' | 'evaluations' | 'contracts' | 'guardian'>('all');
+    const [timelineProfessional, setTimelineProfessional] = useState<string>('all');
+    const [timelinePeriod, setTimelinePeriod] = useState<'all' | 'this_month' | 'three_months'>('all');
+    const [timelineSearch, setTimelineSearch] = useState('');
+    const [timelineSortOrder, setTimelineSortOrder] = useState<'desc' | 'asc'>('desc');
+
     // Modo de Edição de Dados Pessoais
     const [isEditingInfo, setIsEditingInfo] = useState(false);
+    const [savingInfo, setSavingInfo] = useState(false);
+
+    // Form State (Personal Info)
     const [editName, setEditName] = useState(patient.name);
+    const [editIsSocialName, setEditIsSocialName] = useState(patient.isSocialName || false);
+    const [editSocialName, setEditSocialName] = useState(patient.socialName || '');
     const [editCpf, setEditCpf] = useState(patient.cpf || '');
-    const [editPhone, setEditPhone] = useState(patient.phone);
+    const [editRg, setEditRg] = useState(patient.rg || '');
+    const [editCns, setEditCns] = useState(patient.cns || '');
     const [editBirthDate, setEditBirthDate] = useState(patient.birthDate || '');
+    const [editMaritalStatus, setEditMaritalStatus] = useState(patient.maritalStatus || '');
+    const [editGender, setEditGender] = useState(patient.gender || '');
+    const [editProfession, setEditProfession] = useState(patient.profession || '');
+    const [editCompanyName, setEditCompanyName] = useState(patient.companyName || '');
+    const [editBriefDiagnosis, setEditBriefDiagnosis] = useState(patient.briefDiagnosis || '');
+
+    // Form State (Contact)
+    const [editPhone, setEditPhone] = useState(patient.phone || '');
+    const [editLandlinePhone, setEditLandlinePhone] = useState(patient.landlinePhone || '');
+    const [editEmail, setEditEmail] = useState(patient.email || '');
+    const [editContactPreference, setEditContactPreference] = useState<'whatsapp' | 'email' | 'sms' | 'call'>(patient.contactPreference || 'whatsapp');
+    const [editAllowReminders, setEditAllowReminders] = useState(patient.allowReminders !== undefined ? patient.allowReminders : true);
+
+    // Form State (Insurance)
+    const [editAgreementId, setEditAgreementId] = useState(patient.agreementId || '');
+    const [editInsuranceCardNumber, setEditInsuranceCardNumber] = useState(patient.insuranceCardNumber || '');
+    const [editInsuranceCardExpiry, setEditInsuranceCardExpiry] = useState(patient.insuranceCardExpiry || '');
+    const [editInsuranceCardHolder, setEditInsuranceCardHolder] = useState(patient.insuranceCardHolder || '');
+
+    // Form State (Address)
+    const [editCountry, setEditCountry] = useState(patient.country || 'Brasil');
     const [editCep, setEditCep] = useState(patient.cep || '');
+    const [editState, setEditState] = useState(patient.state || 'SC');
+    const [editCity, setEditCity] = useState(patient.city || '');
     const [editStreet, setEditStreet] = useState(patient.street || '');
     const [editNumber, setEditNumber] = useState(patient.number || '');
     const [editBairro, setEditBairro] = useState(patient.bairro || '');
-    const [editCity, setEditCity] = useState(patient.city || '');
     const [editComplement, setEditComplement] = useState(patient.complement || '');
-    const [savingInfo, setSavingInfo] = useState(false);
+
+    // Form State (Guardian / Pediatric)
+    const [editHasGuardian, setEditHasGuardian] = useState(patient.hasGuardian || false);
+    const [editGuardianName, setEditGuardianName] = useState(patient.guardianName || '');
+    const [editGuardianRelationship, setEditGuardianRelationship] = useState(patient.guardianRelationship || 'Mãe');
+    const [editGuardianCpf, setEditGuardianCpf] = useState(patient.guardianCpf || '');
+    const [editGuardianPhone, setEditGuardianPhone] = useState(patient.guardianPhone || '');
+    const [editGuardianEmail, setEditGuardianEmail] = useState(patient.guardianEmail || '');
+    const [editHomeCareInstructions, setEditHomeCareInstructions] = useState(patient.homeCareInstructions || '');
+
+    // Form State (Referral)
+    const [editReferralSource, setEditReferralSource] = useState(patient.referralSource || '');
+    const [editReferralDoctor, setEditReferralDoctor] = useState(patient.referralDoctor || '');
 
     // Photo Capture State
     const [showCamera, setShowCamera] = useState(false);
     const [currentPhoto, setCurrentPhoto] = useState<string | undefined>(patient.photoUrl);
     const videoRef = useRef<HTMLVideoElement>(null);
-
-    // Plan & Session History
-    const [patientHistory, setPatientHistory] = useState<Session[]>([]);
-    const [loadingHistory, setLoadingHistory] = useState(true);
-    const [showSignatureModal, setShowSignatureModal] = useState(false);
-    const [sessionToSign, setSessionToSign] = useState<string | null>(null);
 
     const loadClinicalData = async () => {
         setLoadingClinical(true);
@@ -159,248 +209,6 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
         });
     }, [patient.id]);
 
-    const handleStartCamera = async () => {
-        setShowCamera(true);
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-            }
-        } catch (err) {
-            console.error(err);
-            toast.error('Erro ao acessar câmera. Verifique se você deu permissão.');
-            setShowCamera(false);
-        }
-    };
-
-    const handleStopCamera = () => {
-        if (videoRef.current && videoRef.current.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
-        }
-        setShowCamera(false);
-    };
-
-    const handleCapture = () => {
-        if (videoRef.current) {
-            const canvas = document.createElement('canvas');
-            canvas.width = videoRef.current.videoWidth;
-            canvas.height = videoRef.current.videoHeight;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-                ctx.drawImage(videoRef.current, 0, 0);
-                const dataUrl = canvas.toDataURL('image/jpeg');
-
-                (async () => {
-                    try {
-                        const fileName = `patient-${patient.id}-${Date.now()}.jpg`;
-                        const publicUrl = await storageApi.uploadBase64('patient-photos', fileName, dataUrl);
-                        await patientsApi.update(patient.id, { photoUrl: publicUrl });
-                        setCurrentPhoto(publicUrl);
-                        setPatient(prev => ({ ...prev, photoUrl: publicUrl }));
-                        if (onUpdatePatient) onUpdatePatient({ id: patient.id, photoUrl: publicUrl });
-                        toast.success('Foto capturada e salva com sucesso!');
-                    } catch (error) {
-                        console.error('Error uploading photo:', error);
-                        toast.error('Erro ao salvar foto');
-                    }
-                })();
-
-                handleStopCamera();
-            }
-        }
-    };
-
-    const handleDeletePhoto = () => {
-        const executeDelete = async () => {
-            try {
-                await patientsApi.update(patient.id, { photoUrl: '' });
-                setCurrentPhoto(undefined);
-                setPatient(prev => ({ ...prev, photoUrl: undefined }));
-                if (onUpdatePatient) onUpdatePatient({ id: patient.id, photoUrl: undefined });
-                toast.success('Foto de perfil removida com sucesso!');
-            } catch (err) {
-                console.error(err);
-                toast.error('Erro ao remover foto de perfil');
-            }
-        };
-
-        if (onRequestConfirm) {
-            onRequestConfirm({
-                title: 'Remover Foto de Perfil',
-                description: 'Tem certeza que deseja remover a foto de perfil deste paciente?',
-                confirmLabel: 'Remover Foto',
-                variant: 'danger',
-                onConfirm: executeDelete
-            });
-        } else {
-            executeDelete();
-        }
-    };
-
-    const handleOpenSignatureModal = (sessionId: string) => {
-        setSessionToSign(sessionId);
-        setShowSignatureModal(true);
-    };
-
-    const handleConfirmSignature = async (imageData: string, type: 'signature' | 'photo') => {
-        if (!sessionToSign) return;
-        try {
-            const fileName = `session-${sessionToSign}-${Date.now()}.png`;
-            const publicUrl = await storageApi.uploadBase64('signatures', fileName, imageData);
-            await sessionsApi.update(sessionToSign, {
-                status: SessionStatus.COMPLETED,
-                signed: true,
-                signatureUrl: publicUrl
-            });
-
-            setPatientHistory(prev => prev.map(s => s.id === sessionToSign ? {
-                ...s,
-                status: SessionStatus.COMPLETED,
-                signed: true,
-                signatureUrl: publicUrl
-            } : s));
-
-            toast.success(`Presença confirmada via ${type === 'signature' ? 'assinatura' : 'foto'}!`);
-            setShowSignatureModal(false);
-            setSessionToSign(null);
-        } catch (error) {
-            console.error('Error confirming presence:', error);
-            toast.error('Erro ao salvar confirmação de presença');
-        }
-    };
-
-    // Ações de Plano
-    const handleOpenPlanModal = () => {
-        if (patient.plan) {
-            const match = planTemplates.find(t => t.name === patient.plan?.name);
-            if (match) {
-                setSelectedPlanTemplateId(match.id);
-                setCustomPlanName(match.name);
-            } else {
-                setSelectedPlanTemplateId('custom');
-                setCustomPlanName(patient.plan.name);
-            }
-            setPlanTotalSessions(patient.plan.totalSessions || 10);
-            setPlanRemainingSessions(patient.plan.remainingSessions || 10);
-            setPlanTotalPaid(patient.plan.totalPaid || 0);
-            setPlanPaymentStatus(patient.plan.paymentStatus === 'paid' ? 'paid' : 'pending');
-            setPlanPaymentMethod(patient.plan.paymentMethod || 'pix');
-        } else {
-            setSelectedPlanTemplateId(planTemplates[0]?.id || 'custom');
-            if (planTemplates[0]) {
-                setCustomPlanName(planTemplates[0].name);
-                setPlanTotalSessions(planTemplates[0].sessions);
-                setPlanRemainingSessions(planTemplates[0].sessions);
-                setPlanTotalPaid(planTemplates[0].price);
-            }
-            setPlanPaymentStatus('paid');
-            setPlanPaymentMethod('pix');
-        }
-        setIsPlanModalOpen(true);
-    };
-
-    const handleSelectTemplate = (templateId: string) => {
-        setSelectedPlanTemplateId(templateId);
-        if (templateId === 'avulso') {
-            setCustomPlanName('Particular / Avulso');
-            setPlanTotalSessions(0);
-            setPlanRemainingSessions(0);
-            setPlanTotalPaid(0);
-            setPlanExpiryDays(365);
-        } else if (templateId === 'custom') {
-            setCustomPlanName('');
-            setPlanTotalSessions(10);
-            setPlanRemainingSessions(10);
-            setPlanTotalPaid(0);
-        } else {
-            const t = planTemplates.find(tpl => tpl.id === templateId);
-            if (t) {
-                setCustomPlanName(t.name);
-                setPlanTotalSessions(t.sessions);
-                setPlanRemainingSessions(t.sessions);
-                setPlanTotalPaid(t.price);
-            }
-        }
-    };
-
-    const handleSavePlan = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setSavingPlan(true);
-        try {
-            const expiryDate = new Date();
-            expiryDate.setDate(expiryDate.getDate() + planExpiryDays);
-
-            const planPayload = {
-                name: customPlanName.trim() || 'Plano Personalizado',
-                totalSessions: Number(planTotalSessions),
-                remainingSessions: Number(planRemainingSessions),
-                expiresAt: expiryDate.toISOString(),
-                totalPaid: Number(planTotalPaid) || 0,
-                paymentStatus: planPaymentStatus,
-                paymentDate: planPaymentStatus === 'paid' ? new Date().toISOString() : undefined,
-                paymentMethod: planPaymentMethod
-            };
-
-            await patientsApi.update(patient.id, { plan: planPayload });
-            setPatient(prev => ({ ...prev, plan: planPayload }));
-            if (onUpdatePatient) onUpdatePatient({ id: patient.id, plan: planPayload });
-
-            toast.success('Plano vinculado com sucesso!');
-            setIsPlanModalOpen(false);
-        } catch (error) {
-            console.error('Erro ao salvar plano:', error);
-            toast.error('Erro ao vincular plano ao paciente.');
-        } finally {
-            setSavingPlan(false);
-        }
-    };
-
-    // Ações de Edição de Dados Pessoais
-    const handleSaveInfo = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (editCpf && !validateCpf(editCpf)) {
-            toast.error('CPF inválido. Por favor, verifique os números.');
-            return;
-        }
-
-        setSavingInfo(true);
-        try {
-            const formattedAddress = [
-                editStreet,
-                editNumber ? `nº ${editNumber}` : '',
-                editBairro ? `Bairro ${editBairro}` : '',
-                editComplement
-            ].filter(Boolean).join(', ');
-
-            const updates: Partial<Patient> = {
-                name: editName.trim(),
-                phone: editPhone.trim(),
-                cpf: editCpf.trim() || undefined,
-                birthDate: editBirthDate || undefined,
-                cep: editCep || undefined,
-                street: editStreet || undefined,
-                number: editNumber || undefined,
-                bairro: editBairro || undefined,
-                city: editCity || undefined,
-                complement: editComplement || undefined,
-                address: formattedAddress || undefined
-            };
-
-            await patientsApi.update(patient.id, updates);
-            setPatient(prev => ({ ...prev, ...updates }));
-            if (onUpdatePatient) onUpdatePatient({ id: patient.id, ...updates });
-
-            toast.success('Dados cadastrais atualizados com sucesso!');
-            setIsEditingInfo(false);
-        } catch (error) {
-            console.error('Erro ao atualizar dados:', error);
-            toast.error('Erro ao salvar alterações do paciente.');
-        } finally {
-            setSavingInfo(false);
-        }
-    };
-
     const handleCepSearch = async (val: string) => {
         const masked = maskCep(val);
         setEditCep(masked);
@@ -410,10 +218,11 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                 const res = await fetch(`https://viacep.com.br/ws/${clean}/json/`);
                 const data = await res.json();
                 if (!data.erro) {
-                    if (data.localidade && data.uf) setEditCity(`${data.localidade} - ${data.uf}`);
                     if (data.logradouro) setEditStreet(data.logradouro);
                     if (data.bairro) setEditBairro(data.bairro);
-                    toast.success('Endereço localizado via CEP!');
+                    if (data.localidade) setEditCity(data.localidade);
+                    if (data.uf) setEditState(data.uf);
+                    toast.success('Endereço preenchido automaticamente!');
                 }
             } catch (err) {
                 console.error(err);
@@ -421,697 +230,954 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
         }
     };
 
-    const handlePrint = () => {
-        const printWindow = window.open('', '', 'width=900,height=700');
-        if (!printWindow) {
-            toast.error('O bloqueador de pop-ups impediu a impressão. Por favor, permita pop-ups para este site.');
+    const handleSaveInfo = async (e?: React.FormEvent) => {
+        if (e) e.preventDefault();
+        if (!editName.trim()) {
+            toast.error('Informe o nome do paciente.');
             return;
         }
 
-        const htmlContent = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Ficha de Controle - ${patient.name}</title>
-                <style>
-                    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-                    body { font-family: 'Inter', sans-serif; color: #111; padding: 40px; max-width: 210mm; margin: 0 auto; background: white; }
-                    .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; border-bottom: 2px solid #111; padding-bottom: 20px; }
-                    .brand { font-size: 26px; font-weight: 800; color: #2563EB; letter-spacing: -0.5px; }
-                    .unit-details { text-align: right; font-size: 12px; color: #444; line-height: 1.5; }
-                    .section-header { font-size: 14px; text-transform: uppercase; font-weight: 700; color: #000; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-top: 25px; margin-bottom: 15px; }
-                    .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; font-size: 14px; }
-                    .info-item label { font-size: 11px; text-transform: uppercase; color: #666; font-weight: 600; display: block; margin-bottom: 3px; }
-                    .info-item span { font-weight: 500; font-size: 15px; color: #000; }
-                    .sessions-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-                    .sessions-table th { text-align: left; border-bottom: 2px solid #000; padding: 10px 5px; font-weight: 700; font-size: 12px; text-transform: uppercase; }
-                    .sessions-table td { border-bottom: 1px solid #ddd; padding: 12px 5px; vertical-align: middle; }
-                    .signature-box { border-bottom: 1px solid #000; height: 30px; width: 100%; }
-                    .footer { margin-top: 50px; text-align: center; font-size: 11px; color: #666; border-top: 1px solid #eee; padding-top: 15px; }
-                    @media print { @page { size: A4; margin: 15mm; } body { padding: 0; } }
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <div class="brand">FisioStar</div>
-                    <div class="unit-details">
-                        <strong>${unitName}</strong><br/>
-                        Ficha de Controle de Sessões<br/>
-                        Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}
-                    </div>
-                </div>
+        try {
+            setSavingInfo(true);
+            const updates: Partial<Patient> = {
+                name: editName.trim(),
+                isSocialName: editIsSocialName,
+                socialName: editSocialName.trim() || undefined,
+                cpf: editCpf.trim() || undefined,
+                rg: editRg.trim() || undefined,
+                cns: editCns.trim() || undefined,
+                birthDate: editBirthDate || undefined,
+                maritalStatus: editMaritalStatus || undefined,
+                gender: editGender || undefined,
+                profession: editProfession.trim() || undefined,
+                companyName: editCompanyName.trim() || undefined,
+                briefDiagnosis: editBriefDiagnosis.trim() || undefined,
+                phone: editPhone.trim(),
+                landlinePhone: editLandlinePhone.trim() || undefined,
+                email: editEmail.trim() || undefined,
+                contactPreference: editContactPreference,
+                allowReminders: editAllowReminders,
+                agreementId: editAgreementId || undefined,
+                insuranceCardNumber: editInsuranceCardNumber.trim() || undefined,
+                insuranceCardExpiry: editInsuranceCardExpiry || undefined,
+                insuranceCardHolder: editInsuranceCardHolder.trim() || undefined,
+                country: editCountry || 'Brasil',
+                cep: editCep.trim() || undefined,
+                state: editState || undefined,
+                city: editCity.trim() || undefined,
+                street: editStreet.trim() || undefined,
+                number: editNumber.trim() || undefined,
+                bairro: editBairro.trim() || undefined,
+                complement: editComplement.trim() || undefined,
+                address: editStreet ? `${editStreet}${editNumber ? ', ' + editNumber : ''}${editBairro ? ' - ' + editBairro : ''}${editCity ? ', ' + editCity : ''}` : undefined,
+                hasGuardian: editHasGuardian,
+                guardianName: editGuardianName.trim() || undefined,
+                guardianRelationship: editGuardianRelationship || undefined,
+                guardianCpf: editGuardianCpf.trim() || undefined,
+                guardianPhone: editGuardianPhone.trim() || undefined,
+                guardianEmail: editGuardianEmail.trim() || undefined,
+                homeCareInstructions: editHomeCareInstructions.trim() || undefined,
+                referralSource: editReferralSource || undefined,
+                referralDoctor: editReferralDoctor.trim() || undefined
+            };
 
-                <div class="section-header">Dados do Paciente</div>
-                <div class="info-grid">
-                    <div class="info-item"><label>Nome Completo</label><span>${patient.name}</span></div>
-                    <div class="info-item"><label>Telefone</label><span>${patient.phone}</span></div>
-                    <div class="info-item"><label>CPF</label><span>${patient.cpf || '-'}</span></div>
-                    <div class="info-item"><label>Plano Contratado</label><span>${patient.plan?.name || 'N/A'}</span></div>
-                </div>
+            const updated = await patientsApi.update(patient.id, updates);
+            setPatient(updated);
+            if (onUpdatePatient) onUpdatePatient({ id: patient.id, ...updates });
+            toast.success('Dados cadastrais atualizados com sucesso!');
+            setIsEditingInfo(false);
+        } catch (error) {
+            console.error('Error saving patient details:', error);
+            toast.error('Erro ao salvar dados do paciente.');
+        } finally {
+            setSavingInfo(false);
+        }
+    };
 
-                <div class="section-header">Registro de Presença</div>
-                <table class="sessions-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 5%">#</th>
-                            <th style="width: 15%">Data</th>
-                            <th style="width: 15%">Horário</th>
-                            <th style="width: 25%">Profissional</th>
-                            <th style="width: 15%">Status</th>
-                            <th style="width: 25%">Assinatura do Paciente</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${Array.from({ length: patient.plan?.totalSessions || 10 }).map((_, index) => {
-                            const session = patientHistory[index];
-                            const dateStr = session ? new Date(session.date + 'T00:00:00').toLocaleDateString('pt-BR') : '____/____/____';
-                            const timeStr = session ? session.time : '____:____';
-                            const prof = session ? professionals.find(p => p.id === session.professionalId)?.name || '-' : '_________________';
-                            const statusStr = session ? session.status : 'Pendente';
-                            return `
-                                <tr>
-                                    <td>${index + 1}</td>
-                                    <td>${dateStr}</td>
-                                    <td>${timeStr}</td>
-                                    <td>${prof}</td>
-                                    <td>${statusStr}</td>
-                                    <td><div class="signature-box"></div></td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </tbody>
-                </table>
-                <div class="footer">Documento gerado pelo sistema FisioStar - Sistema de Gestão para Clínicas de Fisioterapia</div>
-            </body>
-            </html>
-        `;
-        printWindow.document.write(htmlContent);
-        printWindow.document.close();
+    // Calculate Age
+    const calculatedAge = useMemo(() => {
+        if (!patient.birthDate) return null;
+        const birth = new Date(patient.birthDate + 'T00:00:00');
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+            age--;
+        }
+        return age >= 0 ? age : null;
+    }, [patient.birthDate]);
+
+    // Aggregate Timeline Events
+    interface TimelineEvent {
+        id: string;
+        type: 'session' | 'evolution' | 'evaluation' | 'contract' | 'guardian_note';
+        date: string;
+        time?: string;
+        title: string;
+        subtitle: string;
+        professionalName?: string;
+        status?: string;
+        statusColor?: string;
+        details?: string;
+        badge?: string;
+        rawObject?: any;
+    }
+
+    const timelineEvents = useMemo(() => {
+        const events: TimelineEvent[] = [];
+
+        // Sessions
+        patientHistory.forEach(s => {
+            const prof = professionals.find(p => p.id === s.professionalId);
+            events.push({
+                id: `session-${s.id}`,
+                type: 'session',
+                date: s.date,
+                time: s.time,
+                title: s.type || 'Atendimento de Fisioterapia',
+                subtitle: `Fisioterapeuta: ${prof?.name || 'Não atribuído'}`,
+                professionalName: prof?.name,
+                status: s.status,
+                details: s.notes,
+                rawObject: s
+            });
+        });
+
+        // Evolutions
+        evolutions.forEach(ev => {
+            const prof = professionals.find(p => p.id === ev.professionalId);
+            events.push({
+                id: `evolution-${ev.id}`,
+                type: 'evolution',
+                date: ev.date,
+                title: 'Evolução Clínica Diária',
+                subtitle: `Fisioterapeuta: ${prof?.name || 'Profissional'} • ${ev.specialty || 'Geral'}`,
+                professionalName: prof?.name,
+                details: ev.conduct || ev.subjective || ev.assessment,
+                rawObject: ev
+            });
+        });
+
+        // Evaluations
+        evaluations.forEach(evalItem => {
+            const prof = professionals.find(p => p.id === evalItem.professionalId);
+            events.push({
+                id: `evaluation-${evalItem.id}`,
+                type: 'evaluation',
+                date: evalItem.date,
+                title: `Avaliação Clínica (${evalItem.specialty || 'Anamnese'})`,
+                subtitle: `Avaliador: ${prof?.name || 'Profissional'}${evalItem.painLevel !== undefined ? ` • Dor EVA: ${evalItem.painLevel}/10` : ''}`,
+                professionalName: prof?.name,
+                details: `Queixa: ${evalItem.chiefComplaint}${evalItem.diagnosis ? ` | Diagnóstico: ${evalItem.diagnosis}` : ''}`,
+                rawObject: evalItem
+            });
+        });
+
+        // Contracts / Plans
+        contracts.forEach(c => {
+            events.push({
+                id: `contract-${c.id}`,
+                type: 'contract',
+                date: c.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
+                title: `Contrato / Termo de Tratamento`,
+                subtitle: `Plano: ${c.planName || 'Pacote Terapêutico'} (${c.totalSessions || 0} sessões)`,
+                details: `Status: ${c.status === 'signed' ? 'Assinado digitalmente' : 'Pendente de assinatura'}`,
+                rawObject: c
+            });
+        });
+
+        // Home Care / Pediatric Instructions
+        if (patient.homeCareInstructions) {
+            events.push({
+                id: `guardian-instruction-${patient.id}`,
+                type: 'guardian_note',
+                date: patient.updatedAt ? patient.updatedAt.split('T')[0] : (patient.lastVisit || new Date().toISOString().split('T')[0]),
+                title: 'Orientações Domiciliares para os Pais (Home Care)',
+                subtitle: `Destinatário: ${patient.guardianName || 'Família / Responsável'}`,
+                details: patient.homeCareInstructions,
+                rawObject: patient
+            });
+        }
+
+        // Apply Filters
+        return events.filter(item => {
+            // Category filter
+            if (timelineCategory === 'sessions' && item.type !== 'session') return false;
+            if (timelineCategory === 'evolutions' && item.type !== 'evolution') return false;
+            if (timelineCategory === 'evaluations' && item.type !== 'evaluation') return false;
+            if (timelineCategory === 'contracts' && item.type !== 'contract') return false;
+            if (timelineCategory === 'guardian' && item.type !== 'guardian_note') return false;
+
+            // Professional filter
+            if (timelineProfessional !== 'all' && item.professionalName !== timelineProfessional) return false;
+
+            // Period filter
+            if (timelinePeriod !== 'all') {
+                const itemDate = new Date(item.date);
+                const now = new Date();
+                if (timelinePeriod === 'this_month') {
+                    if (itemDate.getMonth() !== now.getMonth() || itemDate.getFullYear() !== now.getFullYear()) return false;
+                } else if (timelinePeriod === 'three_months') {
+                    const threeMonthsAgo = new Date();
+                    threeMonthsAgo.setMonth(now.getMonth() - 3);
+                    if (itemDate < threeMonthsAgo) return false;
+                }
+            }
+
+            // Search filter
+            if (timelineSearch.trim()) {
+                const q = timelineSearch.toLowerCase();
+                const matchText = (item.title + ' ' + item.subtitle + ' ' + (item.details || '')).toLowerCase();
+                if (!matchText.includes(q)) return false;
+            }
+
+            return true;
+        }).sort((a, b) => {
+            const timeA = new Date(a.date + (a.time ? 'T' + a.time : 'T00:00:00')).getTime();
+            const timeB = new Date(b.date + (b.time ? 'T' + b.time : 'T00:00:00')).getTime();
+            return timelineSortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+        });
+    }, [patientHistory, evolutions, evaluations, contracts, patient.homeCareInstructions, timelineCategory, timelineProfessional, timelinePeriod, timelineSearch, timelineSortOrder, professionals]);
+
+    // Summary Counters
+    const counters = useMemo(() => {
+        return {
+            evaluations: evaluations.length,
+            evolutions: evolutions.length,
+            scheduled: patientHistory.filter(s => s.status === 'Agendada' || s.status === 'Confirmada').length,
+            completed: patientHistory.filter(s => s.status === 'Realizada' || s.status === 'Atendido').length,
+            cancelled: patientHistory.filter(s => s.status === 'Cancelada' || s.status === 'Cancelado').length,
+            noShow: patientHistory.filter(s => s.status === 'Falta' || s.status === 'Faltou').length,
+            hasGuardian: !!patient.hasGuardian
+        };
+    }, [evaluations, evolutions, patientHistory, patient.hasGuardian]);
+
+    // Group Timeline Events by Date
+    const groupedTimeline = useMemo(() => {
+        const groups: { date: string; formattedDate: string; items: TimelineEvent[] }[] = [];
+        timelineEvents.forEach(ev => {
+            const lastGroup = groups[groups.length - 1];
+            if (lastGroup && lastGroup.date === ev.date) {
+                lastGroup.items.push(ev);
+            } else {
+                const d = new Date(ev.date + 'T00:00:00');
+                const formattedDate = isNaN(d.getTime()) ? ev.date : d.toLocaleDateString('pt-BR', {
+                    day: '2-digit',
+                    month: '2-digit',
+                    year: 'numeric'
+                });
+                groups.push({
+                    date: ev.date,
+                    formattedDate,
+                    items: [ev]
+                });
+            }
+        });
+        return groups;
+    }, [timelineEvents]);
+
+    const handlePrint = () => {
+        window.print();
     };
 
     return (
         <div className="space-y-4 animate-fade-in pb-10">
-            {/* Top Navigation Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:px-6 rounded-2xl border border-gray-200/90 shadow-xs">
+            {/* Top Navigation Header Clean */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 sm:px-6 rounded-2xl border border-slate-200/90 shadow-xs">
                 <div className="flex items-center gap-3">
                     <button
                         type="button"
                         onClick={onClose}
-                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs group"
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer group"
                         title="Voltar para lista de pacientes"
                     >
-                        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-                        <span>Voltar para Pacientes</span>
+                        <span>← Voltar para Pacientes</span>
                     </button>
-                    <div className="h-6 w-px bg-gray-200 hidden sm:block" />
+                    <div className="h-6 w-px bg-slate-200 hidden sm:block" />
                     <div>
                         <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Prontuário Clínico</span>
-                            <span className="text-gray-300">•</span>
+                            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Prontuário & Histórico</span>
+                            <span className="text-slate-300">•</span>
                             <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">{unitName}</span>
+                            {calculatedAge !== null && (
+                                <span className="text-xs text-slate-500 font-medium">({calculatedAge} anos)</span>
+                            )}
                         </div>
-                        <h1 className="text-lg sm:text-xl font-extrabold text-gray-900 tracking-tight">{patient.name}</h1>
+                        <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+                            <span>{patient.name}</span>
+                            {patient.isSocialName && patient.socialName && (
+                                <span className="text-xs font-normal text-slate-500 italic">({patient.socialName})</span>
+                            )}
+                        </h1>
                     </div>
                 </div>
 
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={handlePrint}
-                        className="px-3.5 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                        onClick={() => navigate(`/agenda?patientId=${patient.id}`)}
+                        className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
                     >
-                        <Printer className="w-4 h-4 text-gray-500" />
-                        <span>Imprimir Ficha</span>
+                        Ver na Agenda
+                    </button>
+                    <button
+                        onClick={() => setIsDocGenModalOpen(true)}
+                        className="px-3.5 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                        Gerar Documento
+                    </button>
+                    <button
+                        onClick={handlePrint}
+                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer"
+                    >
+                        Imprimir Prontuário
                     </button>
                 </div>
             </div>
 
-            {/* Main Content Layout */}
-            <div className="bg-white rounded-2xl border border-gray-200/90 shadow-sm overflow-hidden flex flex-col lg:flex-row min-h-[750px]">
-                {/* Left Sidebar */}
-                <div className="w-full lg:w-80 bg-gray-50/70 border-r border-gray-200/80 p-6 flex flex-col items-center flex-shrink-0">
-                    <div className="relative group mb-4">
-                        <div className="w-32 h-32 rounded-full overflow-hidden shadow-md border-4 border-white relative bg-white">
+            {/* Main Layout Grid */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden flex flex-col lg:flex-row min-h-[750px]">
+                {/* Left Sidebar Clean */}
+                <div className="w-full lg:w-72 bg-slate-50/70 border-r border-slate-200/80 p-5 flex flex-col items-center flex-shrink-0 space-y-4">
+                    {/* Patient Photo */}
+                    <div className="relative group">
+                        <div className="w-28 h-28 rounded-full overflow-hidden shadow-md border-4 border-white relative bg-white">
                             {currentPhoto ? (
                                 <img src={currentPhoto} alt={patient.name} className="w-full h-full object-cover" />
                             ) : (
-                                <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-4xl">
+                                <div className="w-full h-full bg-blue-100 flex items-center justify-center text-blue-600 font-extrabold text-3xl">
                                     {patient.name.charAt(0)}
                                 </div>
                             )}
-
-                            <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
-                                <UploadCloud className="w-8 h-8 text-white" />
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={async (e) => {
-                                        const file = e.target.files?.[0];
-                                        if (!file) return;
-                                        try {
-                                            const publicUrl = await storageApi.uploadFile('patient-photos', `patient-${patient.id}-${Date.now()}`, file);
-                                            await patientsApi.update(patient.id, { photoUrl: publicUrl });
-                                            setCurrentPhoto(publicUrl);
-                                            setPatient(prev => ({ ...prev, photoUrl: publicUrl }));
-                                            if (onUpdatePatient) onUpdatePatient({ id: patient.id, photoUrl: publicUrl });
-                                            toast.success('Foto atualizada!');
-                                        } catch (err) {
-                                            console.error(err);
-                                            toast.error('Erro ao enviar foto');
-                                        }
-                                    }}
-                                />
-                            </label>
-                        </div>
-
-                        <div className="absolute bottom-0 right-0 flex items-center gap-1 z-10">
-                            {currentPhoto && (
-                                <button
-                                    type="button"
-                                    onClick={handleDeletePhoto}
-                                    className="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 shadow-md transition-transform hover:scale-105"
-                                    title="Excluir foto de perfil"
-                                >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={handleStartCamera}
-                                className="p-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 shadow-md transition-transform hover:scale-105"
-                                title="Tirar foto com câmera"
-                            >
-                                <Camera className="w-3.5 h-3.5" />
-                            </button>
                         </div>
                     </div>
 
-                    <h2 className="text-xl font-bold text-center text-gray-900 leading-snug">{patient.name}</h2>
-                    <a
-                        href={getWhatsappUrl(patient.phone)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="text-sm text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1.5 hover:underline mb-4 mt-1 transition-colors"
-                        title="Abrir conversa no WhatsApp"
-                    >
-                        <PhoneIcon className="w-4 h-4 text-emerald-600 fill-emerald-50" />
-                        <span>{patient.phone}</span>
-                    </a>
+                    <div className="text-center w-full">
+                        <h2 className="text-base font-bold text-slate-900 leading-snug">{patient.name}</h2>
+                        {patient.phone && (
+                            <a
+                                href={getWhatsappUrl(patient.phone)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-emerald-600 hover:text-emerald-700 font-semibold inline-flex items-center gap-1 hover:underline mt-0.5"
+                            >
+                                <span>WhatsApp: {formatPhone(patient.phone)}</span>
+                            </a>
+                        )}
+                        {patient.briefDiagnosis && (
+                            <p className="text-[11px] text-slate-600 font-medium bg-slate-100 p-2 rounded-lg mt-2 text-left">
+                                <strong className="text-slate-800">Diagnóstico:</strong> {patient.briefDiagnosis}
+                            </p>
+                        )}
+                    </div>
 
-                    {/* Resumo do Plano Atual na Lateral */}
-                    <div className="w-full bg-white p-3.5 rounded-xl border border-gray-200/90 shadow-2xs mb-4">
-                        <div className="flex justify-between items-center mb-1">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">Plano Ativo</span>
-                            <span className={`text-[10px] px-2 py-0.2 rounded-full font-bold ${patient.plan && patient.plan.remainingSessions > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-600'}`}>
+                    {/* Badge do Responsável / Criança (Araranguá) */}
+                    {patient.hasGuardian && patient.guardianName && (
+                        <div className="w-full bg-indigo-50/80 border border-indigo-200 p-3 rounded-xl text-left">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 block mb-0.5">
+                                Responsável Legal ({patient.guardianRelationship || 'Mãe'})
+                            </span>
+                            <p className="text-xs font-bold text-slate-900">{patient.guardianName}</p>
+                            {patient.guardianPhone && (
+                                <a
+                                    href={getWhatsappUrl(patient.guardianPhone, `Olá ${patient.guardianName}! Entramos em contato da FisioStar sobre o atendimento de ${patient.name}.`)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-[11px] text-indigo-600 hover:underline font-semibold block mt-0.5"
+                                >
+                                    Enviar WhatsApp ao Responsável
+                                </a>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Resumo do Plano */}
+                    <div className="w-full bg-white p-3 rounded-xl border border-slate-200 text-left">
+                        <div className="flex justify-between items-center mb-0.5">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Plano</span>
+                            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${patient.plan && patient.plan.remainingSessions > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
                                 {patient.plan ? (patient.plan.remainingSessions > 0 ? 'Ativo' : 'Esgotado') : 'Sem Plano'}
                             </span>
                         </div>
-                        <p className="text-sm font-extrabold text-gray-900 truncate">{patient.plan?.name || 'Nenhum plano vinculado'}</p>
+                        <p className="text-xs font-bold text-slate-900 truncate">{patient.plan?.name || 'Nenhum plano vinculado'}</p>
                         <p className="text-xs text-blue-600 font-bold mt-0.5">
                             {patient.plan?.remainingSessions || 0} de {patient.plan?.totalSessions || 0} sessões restantes
                         </p>
                     </div>
 
-                    {/* Botões Rápidos e Intuitivos */}
-                    <div className="w-full flex flex-col gap-2 mb-4">
+                    {/* Filtros Rápidos da Timeline com Contadores */}
+                    <div className="w-full space-y-1 pt-1 border-t border-slate-200">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 px-1">
+                            Filtros do Histórico
+                        </span>
+                        
                         <button
                             type="button"
-                            onClick={() => {
-                                setActiveTab('info');
-                                setIsEditingInfo(true);
-                            }}
-                            className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all flex items-center justify-center shadow-xs cursor-pointer"
+                            onClick={() => { setActiveTab('timeline'); setTimelineCategory('all'); }}
+                            className={`w-full px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${timelineCategory === 'all' && activeTab === 'timeline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
                         >
-                            Editar Dados Pessoais
+                            <span>Todas as Atividades</span>
+                            <span className="text-[11px] font-mono">{timelineEvents.length}</span>
                         </button>
 
                         <button
                             type="button"
-                            onClick={() => {
-                                setActiveTab('financial');
-                                handleOpenPlanModal();
-                            }}
-                            className="w-full py-2.5 px-3 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center cursor-pointer"
+                            onClick={() => { setActiveTab('timeline'); setTimelineCategory('evaluations'); }}
+                            className={`w-full px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${timelineCategory === 'evaluations' && activeTab === 'timeline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
                         >
-                            Vincular / Renovar Plano
+                            <span>Avaliações</span>
+                            <span className="text-[11px] font-mono">{counters.evaluations}</span>
                         </button>
 
-                        {onOpenFacialScan && (
+                        <button
+                            type="button"
+                            onClick={() => { setActiveTab('timeline'); setTimelineCategory('evolutions'); }}
+                            className={`w-full px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${timelineCategory === 'evolutions' && activeTab === 'timeline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
+                        >
+                            <span>Evoluções</span>
+                            <span className="text-[11px] font-mono">{counters.evolutions}</span>
+                        </button>
+
+                        <button
+                            type="button"
+                            onClick={() => { setActiveTab('timeline'); setTimelineCategory('sessions'); }}
+                            className={`w-full px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${timelineCategory === 'sessions' && activeTab === 'timeline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
+                        >
+                            <span>Consultas & Sessões</span>
+                            <span className="text-[11px] font-mono">{counters.completed + counters.scheduled}</span>
+                        </button>
+
+                        {patient.homeCareInstructions && (
                             <button
-                                onClick={() => onOpenFacialScan(patient)}
-                                className="w-full py-2.5 px-3 text-xs font-semibold rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 transition-all flex items-center justify-center cursor-pointer"
-                                title="Escanear biometria facial do paciente"
+                                type="button"
+                                onClick={() => { setActiveTab('timeline'); setTimelineCategory('guardian'); }}
+                                className={`w-full px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center justify-between transition-colors cursor-pointer ${timelineCategory === 'guardian' && activeTab === 'timeline' ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700'}`}
                             >
-                                <span>{patient.facialDescriptor ? 'Face Cadastrada ✓' : 'Escanear Biometria'}</span>
+                                <span>Orientações aos Pais</span>
+                                <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 rounded">Home Care</span>
                             </button>
                         )}
+                    </div>
 
-                        <div className="flex gap-2 w-full mt-1">
-                            {onToggleStatus && (
-                                <button
-                                    onClick={() => onToggleStatus(patient)}
-                                    className={`flex-1 py-2 px-2 text-xs font-semibold rounded-xl border transition-colors flex items-center justify-center cursor-pointer ${patient.status === 'Active' ? 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}
-                                >
-                                    {patient.status === 'Active' ? 'Inativar' : 'Ativar'}
-                                </button>
-                            )}
-
-                            {onDelete && (
-                                <button
-                                    onClick={() => {
-                                        if (confirm('Tem certeza que deseja excluir este paciente? Esta ação não pode ser desfeita.')) {
-                                            onClose();
-                                            onDelete(patient.id);
-                                        }
-                                    }}
-                                    className="py-2 px-3 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center cursor-pointer"
-                                    title="Excluir paciente"
-                                >
-                                    Excluir
-                                </button>
-                            )}
-                        </div>
+                    {/* Botões Rápidos */}
+                    <div className="w-full space-y-2 pt-2 border-t border-slate-200">
+                        <button
+                            type="button"
+                            onClick={() => { setSelectedEvolToEdit(null); setIsEvolModalOpen(true); }}
+                            className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs cursor-pointer text-center block"
+                        >
+                            + Nova Evolução
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => { setSelectedEvalToEdit(null); setIsEvalModalOpen(true); }}
+                            className="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-all cursor-pointer text-center block"
+                        >
+                            + Nova Avaliação
+                        </button>
                     </div>
                 </div>
 
-                {/* Right Content: Tabs */}
+                {/* Right Content Area */}
                 <div className="flex-1 flex flex-col min-h-0 bg-white overflow-hidden">
-                    <div className="border-b border-gray-200 bg-gray-50/70 px-4 sm:px-6 overflow-x-auto custom-scrollbar">
-                        <nav className="flex gap-1" aria-label="Tabs">
+                    {/* Navigation Tabs Clean */}
+                    <div className="border-b border-slate-200 bg-slate-50/60 px-4 sm:px-6 overflow-x-auto custom-scrollbar">
+                        <nav className="flex gap-2" aria-label="Tabs">
                             <button
-                                onClick={() => setActiveTab('signatures')}
-                                className={`py-4 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'signatures' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/60'}`}
+                                onClick={() => setActiveTab('timeline')}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'timeline' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                             >
-                                <Clock className="w-4 h-4 text-blue-600" />
-                                <span>Sessões & Presença</span>
+                                <span>Linha do Tempo</span>
                             </button>
+
                             <button
                                 onClick={() => setActiveTab('evaluations')}
-                                className={`py-4 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'evaluations' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/60'}`}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'evaluations' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                             >
-                                <Stethoscope className="w-4 h-4 text-teal-600" />
-                                <span>Avaliações</span>
-                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeTab === 'evaluations' ? 'bg-teal-100 text-teal-800' : 'bg-gray-200/80 text-gray-600'}`}>{evaluations.length}</span>
+                                <span>Avaliações ({evaluations.length})</span>
                             </button>
+
                             <button
                                 onClick={() => setActiveTab('evolutions')}
-                                className={`py-4 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'evolutions' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/60'}`}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'evolutions' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                             >
-                                <Activity className="w-4 h-4 text-purple-600" />
-                                <span>Evoluções</span>
-                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeTab === 'evolutions' ? 'bg-purple-100 text-purple-800' : 'bg-gray-200/80 text-gray-600'}`}>{evolutions.length}</span>
+                                <span>Evoluções ({evolutions.length})</span>
                             </button>
+
+                            <button
+                                onClick={() => setActiveTab('guardian')}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'guardian' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+                            >
+                                <span>Acompanhamento dos Pais</span>
+                            </button>
+
                             <button
                                 onClick={() => setActiveTab('contracts')}
-                                className={`py-4 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'contracts' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/60'}`}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'contracts' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                             >
-                                <ShieldCheck className="w-4 h-4 text-amber-600" />
-                                <span>Contratos & Docs</span>
-                                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeTab === 'contracts' ? 'bg-amber-100 text-amber-800' : 'bg-gray-200/80 text-gray-600'}`}>{contracts.length}</span>
+                                <span>Documentos & Termos ({contracts.length})</span>
                             </button>
+
                             <button
                                 onClick={() => setActiveTab('financial')}
-                                className={`py-4 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'financial' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/60'}`}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'financial' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                             >
-                                <CreditCard className="w-4 h-4 text-emerald-600" />
-                                <span>Financeiro & Plano</span>
+                                <span>Financeiro</span>
                             </button>
+
                             <button
                                 onClick={() => setActiveTab('info')}
-                                className={`py-4 px-3.5 border-b-2 font-bold text-xs sm:text-sm flex items-center gap-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'info' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100/60'}`}
+                                className={`py-3.5 px-4 font-bold text-xs sm:text-sm border-b-2 transition-all whitespace-nowrap cursor-pointer ${activeTab === 'info' ? 'border-blue-600 text-blue-700 bg-white shadow-2xs rounded-t-lg' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                             >
-                                <User className="w-4 h-4 text-indigo-600" />
                                 <span>Dados Pessoais</span>
                             </button>
                         </nav>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6 bg-gray-50/30">
-                        {/* TAB 1: SESSÕES & PRESENÇA */}
-                        {activeTab === 'signatures' && (
-                            <div className="space-y-5 animate-fade-in">
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-                                    <div>
-                                        <h3 className="font-bold text-gray-900 text-sm">Ficha de Presença & Controle</h3>
-                                        <p className="text-xs text-gray-500">Histórico de atendimentos e confirmações de presença.</p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={handlePrint}
-                                            className="bg-gray-50 border border-gray-200 text-gray-700 hover:bg-white hover:border-blue-300 hover:text-blue-600 px-3.5 py-1.5 rounded-lg font-bold transition-all text-xs flex items-center gap-1.5 cursor-pointer"
-                                        >
-                                            <Printer className="w-3.5 h-3.5" />
-                                            Imprimir Ficha
-                                        </button>
+                    <div className="flex-1 overflow-y-auto p-6 bg-slate-50/30">
+                        {/* ======================================================== */}
+                        {/* TAB 1: LINHA DO TEMPO (TIMELINE UNIFICADA & CLEAN)        */}
+                        {/* ======================================================== */}
+                        {activeTab === 'timeline' && (
+                            <div className="space-y-5 animate-fade-in max-w-4xl">
+                                {/* Top Filter Bar Clean */}
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+                                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                                        <div className="sm:col-span-4">
+                                            <input
+                                                type="text"
+                                                placeholder="Buscar no histórico..."
+                                                value={timelineSearch}
+                                                onChange={e => setTimelineSearch(e.target.value)}
+                                                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            />
+                                        </div>
+
+                                        <div className="sm:col-span-3">
+                                            <select
+                                                value={timelineCategory}
+                                                onChange={e => setTimelineCategory(e.target.value as any)}
+                                                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                            >
+                                                <option value="all">Mostrar: Todos os Eventos</option>
+                                                <option value="sessions">Apenas Consultas & Sessões</option>
+                                                <option value="evolutions">Apenas Evoluções Clínicas</option>
+                                                <option value="evaluations">Apenas Avaliações</option>
+                                                <option value="contracts">Apenas Contratos / Planos</option>
+                                                <option value="guardian">Apenas Orientações aos Pais</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="sm:col-span-3">
+                                            <select
+                                                value={timelinePeriod}
+                                                onChange={e => setTimelinePeriod(e.target.value as any)}
+                                                className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                            >
+                                                <option value="all">Período: Todo o Histórico</option>
+                                                <option value="this_month">Período: Este Mês</option>
+                                                <option value="three_months">Período: Últimos 3 Meses</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="sm:col-span-2 flex justify-end">
+                                            <button
+                                                type="button"
+                                                onClick={() => setTimelineSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+                                                className="w-full text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 px-3 py-2 rounded-lg transition-colors text-center cursor-pointer"
+                                                title="Alternar ordem cronológica"
+                                            >
+                                                {timelineSortOrder === 'desc' ? 'Mais Recentes ↓' : 'Mais Antigos ↑'}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
 
-                                {/* Sessions List */}
-                                <div className="space-y-3">
-                                    {loadingHistory ? (
-                                        <div className="text-center py-8 text-gray-400">Carregando histórico...</div>
-                                    ) : patientHistory.length > 0 ? (
-                                        patientHistory.map((session, index) => (
-                                            <div
-                                                key={session.id}
-                                                className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-xs hover:border-blue-200 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs flex items-center justify-center border border-blue-100">
-                                                        #{patientHistory.length - index}
-                                                    </div>
-                                                    <div>
-                                                        <div className="flex items-center gap-2">
-                                                            <span className="font-bold text-sm text-gray-900">
-                                                                {new Date(session.date + 'T00:00:00').toLocaleDateString('pt-BR')} às {session.time}
-                                                            </span>
-                                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                                                                session.status === 'Realizada' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                                                session.status === 'Confirmada' ? 'bg-blue-50 text-blue-700 border border-blue-200' :
-                                                                session.status === 'Cancelada' ? 'bg-red-50 text-red-700 border border-red-200' :
-                                                                'bg-amber-50 text-amber-700 border border-amber-200'
-                                                            }`}>
-                                                                {session.status}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
-                                                            <span>{session.type || 'Fisioterapia'}</span>
-                                                            <span>•</span>
-                                                            <span>{professionals.find(p => p.id === session.professionalId)?.name || 'Profissional não atribuído'}</span>
-                                                        </div>
-                                                    </div>
+                                {/* Timeline Feed */}
+                                {loadingClinical || loadingHistory ? (
+                                    <div className="py-12 text-center text-slate-400 text-xs">Carregando linha do tempo...</div>
+                                ) : groupedTimeline.length === 0 ? (
+                                    <div className="p-8 bg-white rounded-xl border border-slate-200 text-center text-slate-400 text-xs">
+                                        Nenhum registro encontrado para os filtros selecionados.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6">
+                                        {groupedTimeline.map(group => (
+                                            <div key={group.date} className="space-y-3">
+                                                {/* Date Badge */}
+                                                <div className="inline-block">
+                                                    <span className="bg-amber-500 text-white text-xs font-bold px-3 py-1 rounded-md shadow-2xs">
+                                                        {group.formattedDate}
+                                                    </span>
                                                 </div>
 
-                                                <div className="flex items-center gap-2">
-                                                    {session.status === 'Realizada' ? (
-                                                        <span className="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 shadow-2xs">
-                                                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                                            <span>Biometria Facial Confirmada</span>
-                                                        </span>
-                                                    ) : session.status === 'Cancelada' ? (
-                                                        <span className="text-xs text-rose-500 font-medium">Sessão Cancelada</span>
-                                                    ) : (
-                                                        <span className="text-xs bg-slate-50 text-slate-600 border border-slate-200 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
-                                                            <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                                            <span>Aguardando Check-in Biométrico</span>
-                                                        </span>
-                                                    )}
+                                                {/* Event Cards */}
+                                                <div className="space-y-3 pl-2 border-l-2 border-slate-200 ml-3">
+                                                    {group.items.map(ev => (
+                                                        <div
+                                                            key={ev.id}
+                                                            className="bg-white p-4 rounded-xl border border-slate-200/90 shadow-xs hover:border-blue-300 transition-all ml-3 space-y-2 relative"
+                                                        >
+                                                            {/* Event Header */}
+                                                            <div className="flex items-start justify-between gap-2">
+                                                                <div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                                                                            ev.type === 'session' ? 'bg-blue-50 text-blue-700' :
+                                                                            ev.type === 'evolution' ? 'bg-purple-50 text-purple-700' :
+                                                                            ev.type === 'evaluation' ? 'bg-teal-50 text-teal-700' :
+                                                                            ev.type === 'guardian_note' ? 'bg-indigo-50 text-indigo-700' :
+                                                                            'bg-slate-100 text-slate-700'
+                                                                        }`}>
+                                                                            {ev.type === 'session' ? 'Consulta / Atendimento' :
+                                                                             ev.type === 'evolution' ? 'Evolução Clínica' :
+                                                                             ev.type === 'evaluation' ? 'Avaliação Clínica' :
+                                                                             ev.type === 'guardian_note' ? 'Orientações aos Pais' :
+                                                                             'Documento'}
+                                                                        </span>
+                                                                        {ev.time && (
+                                                                            <span className="text-xs font-mono text-slate-500 font-semibold">
+                                                                                às {ev.time.substring(0, 5)}
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                    <h4 className="font-bold text-sm text-slate-900 mt-1">{ev.title}</h4>
+                                                                    <p className="text-xs text-slate-500 font-medium">{ev.subtitle}</p>
+                                                                </div>
+
+                                                                {ev.status && (
+                                                                    <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                                                                        ev.status === 'Realizada' || ev.status === 'Atendido' ? 'bg-emerald-50 text-emerald-700' :
+                                                                        ev.status === 'Agendada' || ev.status === 'Agendado' ? 'bg-blue-50 text-blue-700' :
+                                                                        ev.status === 'Confirmada' || ev.status === 'Confirmado' ? 'bg-teal-50 text-teal-700' :
+                                                                        ev.status === 'Cancelada' || ev.status === 'Cancelado' ? 'bg-amber-50 text-amber-700' :
+                                                                        'bg-red-50 text-red-700'
+                                                                    }`}>
+                                                                        {ev.status}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Event Details Content */}
+                                                            {ev.details && (
+                                                                <div className="bg-slate-50/80 p-3 rounded-lg border border-slate-100 text-xs text-slate-700 whitespace-pre-wrap">
+                                                                    {ev.details}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Pontos de Dor (Escala EVA) */}
+                                                            {ev.rawObject?.pain_points && Array.isArray(ev.rawObject.pain_points) && ev.rawObject.pain_points.length > 0 && (
+                                                                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Pontos de Dor (EVA):</span>
+                                                                    {ev.rawObject.pain_points.map((p: any) => (
+                                                                        <span
+                                                                            key={p.id || Math.random()}
+                                                                            className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-100"
+                                                                        >
+                                                                            <span>{p.label || 'Ponto'}</span>
+                                                                            <span className="bg-rose-600 text-white text-[10px] px-1 rounded-full">{p.intensity}/10</span>
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Anexos e Exames */}
+                                                            {ev.rawObject?.attachments && Array.isArray(ev.rawObject.attachments) && ev.rawObject.attachments.length > 0 && (
+                                                                <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Exames / Laudos:</span>
+                                                                    {ev.rawObject.attachments.map((fileUrl: string, idx: number) => (
+                                                                        <a
+                                                                            key={idx}
+                                                                            href={fileUrl}
+                                                                            target="_blank"
+                                                                            rel="noopener noreferrer"
+                                                                            className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors border border-blue-100"
+                                                                        >
+                                                                            <span>📎 Anexo {idx + 1}</span>
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+
+                                                            {/* Fotos Clínicas */}
+                                                            {ev.rawObject?.images && Array.isArray(ev.rawObject.images) && ev.rawObject.images.length > 0 && (
+                                                                <div className="pt-1">
+                                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">Fotos Posturais / Clínicas:</span>
+                                                                    <div className="flex flex-wrap gap-2">
+                                                                        {ev.rawObject.images.map((imgUrl: string, idx: number) => (
+                                                                            <a
+                                                                                key={idx}
+                                                                                href={imgUrl}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                className="relative group block w-16 h-16 rounded-lg overflow-hidden border border-slate-200 shadow-2xs hover:opacity-90 transition-opacity"
+                                                                            >
+                                                                                <img src={imgUrl} alt={`Foto Clínica ${idx + 1}`} className="w-full h-full object-cover" />
+                                                                            </a>
+                                                                        ))}
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Event Actions */}
+                                                            <div className="flex items-center justify-end gap-2 pt-1">
+                                                                {ev.type === 'session' && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => { setSelectedEvolToEdit(null); setIsEvolModalOpen(true); }}
+                                                                        className="text-xs font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                                                                    >
+                                                                        Registrar Evolução →
+                                                                    </button>
+                                                                )}
+                                                                {ev.type === 'evolution' && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => { setSelectedEvolToEdit(ev.rawObject); setIsEvolModalOpen(true); }}
+                                                                        className="text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+                                                                    >
+                                                                        Ver Detalhes
+                                                                    </button>
+                                                                )}
+                                                                {ev.type === 'evaluation' && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => { setSelectedEvalToEdit(ev.rawObject); setIsEvalModalOpen(true); }}
+                                                                        className="text-xs font-bold text-slate-600 hover:text-slate-900 cursor-pointer"
+                                                                    >
+                                                                        Ver Avaliação Completa
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
-                                        ))
-                                    ) : (
-                                        <div className="p-8 bg-white rounded-xl border border-gray-200 text-center text-gray-400 text-xs">
-                                            Nenhuma sessão registrada para este paciente.
-                                        </div>
-                                    )}
-                                </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {/* TAB 2: AVALIAÇÕES CLÍNICAS */}
+                        {/* ======================================================== */}
+                        {/* TAB 2: AVALIAÇÕES CLÍNICAS (ANAMNESE)                    */}
+                        {/* ======================================================== */}
                         {activeTab === 'evaluations' && (
-                            <div className="space-y-4 animate-fade-in">
-                                <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+                            <div className="space-y-4 animate-fade-in max-w-4xl">
+                                <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
                                     <div>
-                                        <h3 className="font-bold text-gray-900 text-sm">Avaliações Clínicas (Anamneses)</h3>
-                                        <p className="text-xs text-gray-500">Diagnóstico cinético-funcional, escala de dor EVA e plano terapêutico.</p>
+                                        <h3 className="font-bold text-slate-900 text-sm">Avaliações Clínicas</h3>
+                                        <p className="text-xs text-slate-500">Histórico de diagnósticos cinético-funcionais e anamneses.</p>
                                     </div>
                                     <button
                                         onClick={() => { setSelectedEvalToEdit(null); setIsEvalModalOpen(true); }}
-                                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs transition-all cursor-pointer"
                                     >
-                                        <Plus className="w-4 h-4" />
-                                        Nova Avaliação
+                                        + Nova Avaliação
                                     </button>
                                 </div>
 
-                                {loadingClinical ? (
-                                    <div className="p-8 text-center text-gray-400 text-xs">Carregando avaliações...</div>
-                                ) : evaluations.length > 0 ? (
-                                    <div className="space-y-3">
-                                        {evaluations.map(ev => (
-                                            <div
-                                                key={ev.id}
-                                                className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-xs hover:border-blue-200 transition-all flex justify-between items-start"
-                                            >
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-bold text-sm text-gray-900">
-                                                            {new Date(ev.date + 'T00:00:00').toLocaleDateString('pt-BR')}
-                                                        </span>
-                                                        <span className="text-xs bg-teal-50 text-teal-700 px-2 py-0.5 rounded-md font-bold border border-teal-200">
-                                                            {ev.specialty || 'Fisioterapia'}
-                                                        </span>
-                                                        {ev.painLevel !== undefined && (
-                                                            <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded-md font-bold border border-amber-200">
-                                                                EVA: {ev.painLevel}/10
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <p className="text-xs text-gray-700 font-medium"><strong>Queixa Principal:</strong> {ev.chiefComplaint}</p>
-                                                </div>
-
-                                                <button
-                                                    onClick={() => { setSelectedEvalToEdit(ev); setIsEvalModalOpen(true); }}
-                                                    className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-gray-100 transition-colors"
-                                                    title="Editar / Visualizar"
-                                                >
-                                                    <Edit2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        ))}
+                                {evaluations.length === 0 ? (
+                                    <div className="p-8 bg-white rounded-xl border border-slate-200 text-center text-slate-400 text-xs">
+                                        Nenhuma avaliação cadastrada para este paciente.
                                     </div>
                                 ) : (
-                                    <div className="p-8 bg-white rounded-xl border border-gray-200 text-center text-gray-400 text-xs">
-                                        Nenhuma avaliação clínica cadastrada para este paciente.
+                                    <div className="space-y-3">
+                                        {evaluations.map(ev => (
+                                            <div key={ev.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-sm text-slate-900">{ev.date} - {ev.specialty || 'Fisioterapia'}</span>
+                                                    <button
+                                                        onClick={() => { setSelectedEvalToEdit(ev); setIsEvalModalOpen(true); }}
+                                                        className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+                                                    >
+                                                        Editar
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-slate-700"><strong>Queixa:</strong> {ev.chiefComplaint}</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        {/* TAB 3: EVOLUÇÕES CLÍNICAS */}
+                        {/* ======================================================== */}
+                        {/* TAB 3: EVOLUÇÕES CLÍNICAS                                */}
+                        {/* ======================================================== */}
                         {activeTab === 'evolutions' && (
-                            <div className="space-y-4 animate-fade-in">
-                                <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
+                            <div className="space-y-4 animate-fade-in max-w-4xl">
+                                <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
                                     <div>
-                                        <h3 className="font-bold text-gray-900 text-sm">Evoluções Clínicas Diárias (SOAPE)</h3>
-                                        <p className="text-xs text-gray-500">Registro diário de condutas com imutabilidade de 24h.</p>
+                                        <h3 className="font-bold text-slate-900 text-sm">Evoluções Diárias de Tratamento</h3>
+                                        <p className="text-xs text-slate-500">Condutas fisioterapêuticas e resposta clínica.</p>
                                     </div>
                                     <button
                                         onClick={() => { setSelectedEvolToEdit(null); setIsEvolModalOpen(true); }}
-                                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs transition-all cursor-pointer"
                                     >
-                                        <Plus className="w-4 h-4" />
-                                        Nova Evolução
+                                        + Nova Evolução
                                     </button>
                                 </div>
 
-                                {loadingClinical ? (
-                                    <div className="p-8 text-center text-gray-400 text-xs">Carregando evoluções...</div>
-                                ) : evolutions.length > 0 ? (
-                                    <div className="space-y-3">
-                                        {evolutions.map(evo => (
-                                            <div
-                                                key={evo.id}
-                                                className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-xs hover:border-blue-200 transition-all flex justify-between items-start"
-                                            >
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-bold text-sm text-gray-900">
-                                                            {new Date(evo.date + 'T00:00:00').toLocaleDateString('pt-BR')} às {evo.time?.slice(0, 5)}
-                                                        </span>
-                                                        {evo.painLevel !== undefined && (
-                                                            <span className="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-md font-bold border border-purple-200">
-                                                                Dor EVA: {evo.painLevel}/10
-                                                            </span>
-                                                        )}
-                                                        {evo.isLocked && (
-                                                            <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-md font-bold">
-                                                                🔒 Bloqueado 24h
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                    <p className="text-xs text-gray-800 font-medium"><strong>Conduta:</strong> {evo.conduct}</p>
-                                                </div>
-
-                                                <button
-                                                    onClick={() => { setSelectedEvolToEdit(evo); setIsEvolModalOpen(true); }}
-                                                    className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-gray-100 transition-colors"
-                                                    title="Editar / Visualizar"
-                                                >
-                                                    <Edit2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        ))}
+                                {evolutions.length === 0 ? (
+                                    <div className="p-8 bg-white rounded-xl border border-slate-200 text-center text-slate-400 text-xs">
+                                        Nenhuma evolução clínica registrada.
                                     </div>
                                 ) : (
-                                    <div className="p-8 bg-white rounded-xl border border-gray-200 text-center text-gray-400 text-xs">
-                                        Nenhuma evolução diária registrada para este paciente.
+                                    <div className="space-y-3">
+                                        {evolutions.map(ev => (
+                                            <div key={ev.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="font-bold text-sm text-slate-900">{ev.date} • {ev.specialty || 'Fisioterapia'}</span>
+                                                    <button
+                                                        onClick={() => { setSelectedEvolToEdit(ev); setIsEvolModalOpen(true); }}
+                                                        className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+                                                    >
+                                                        Visualizar / Editar
+                                                    </button>
+                                                </div>
+                                                <p className="text-xs text-slate-700 whitespace-pre-wrap">{ev.conduct || ev.subjective}</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
                             </div>
                         )}
 
-                        {/* TAB 4: CONTRATOS & DOCUMENTOS */}
-                        {activeTab === 'contracts' && (
-                            <div className="space-y-4 animate-fade-in">
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-                                    <div>
-                                        <h3 className="font-bold text-gray-900 text-sm">Contratos, Termos & Atestados</h3>
-                                        <p className="text-xs text-gray-500">Documentos assinados com registro criptográfico SHA-256 e emissão de atestados.</p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <button
-                                            onClick={() => setIsDocGenModalOpen(true)}
-                                            className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                                        >
-                                            <FileText className="w-3.5 h-3.5 text-blue-600" />
-                                            Emitir Atestado/Recibo
-                                        </button>
-                                        <button
-                                            onClick={() => { setSelectedContractToView(null); setIsContractModalOpen(true); }}
-                                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
-                                        >
-                                            <Plus className="w-3.5 h-3.5" />
-                                            Novo Contrato
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {loadingClinical ? (
-                                    <div className="p-8 text-center text-gray-400 text-xs">Carregando contratos...</div>
-                                ) : contracts.length > 0 ? (
-                                    <div className="space-y-3">
-                                        {contracts.map(cnt => (
-                                            <div
-                                                key={cnt.id}
-                                                className="bg-white p-4 rounded-xl border border-gray-200/80 shadow-xs hover:border-blue-200 transition-all flex justify-between items-start"
+                        {/* ======================================================== */}
+                        {/* TAB 4: ACOMPANHAMENTO DOS PAIS & PEDIÁTRICO (ARARANGUÁ)  */}
+                        {/* ======================================================== */}
+                        {activeTab === 'guardian' && (
+                            <div className="space-y-5 animate-fade-in max-w-4xl">
+                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                                        <div>
+                                            <h3 className="font-bold text-slate-900 text-base">Acompanhamento Familiar & Pediátrico</h3>
+                                            <p className="text-xs text-slate-500">Orientações domiciliares (Home Care) e comunicação direta com pais e cuidadores.</p>
+                                        </div>
+                                        {patient.guardianPhone && (
+                                            <a
+                                                href={getWhatsappUrl(patient.guardianPhone, `Olá ${patient.guardianName || 'Família'}! Aqui estão as orientações domiciliares de ${patient.name}:\n\n${patient.homeCareInstructions || 'Sem orientações cadastradas no momento.'}`)}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all shadow-xs inline-flex items-center gap-1.5"
                                             >
-                                                <div className="space-y-1">
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="font-bold text-sm text-gray-900">{cnt.title}</span>
-                                                        <span className={`text-xs px-2 py-0.5 rounded-md font-bold ${
-                                                            cnt.status === 'signed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                                                            'bg-amber-50 text-amber-700 border border-amber-200'
-                                                        }`}>
-                                                            {cnt.status === 'signed' ? '✓ Assinado Digitalmente' : 'Pendente de Assinatura'}
-                                                        </span>
-                                                    </div>
-                                                    {cnt.documentHash && (
-                                                        <p className="text-[11px] text-gray-400 font-mono">
-                                                            SHA-256: {cnt.documentHash.slice(0, 16)}...{cnt.documentHash.slice(-8)}
-                                                        </p>
-                                                    )}
-                                                </div>
+                                                Enviar Orientações no WhatsApp
+                                            </a>
+                                        )}
+                                    </div>
 
-                                                <button
-                                                    onClick={() => { setSelectedContractToView(cnt); setIsContractModalOpen(true); }}
-                                                    className="p-1.5 text-gray-400 hover:text-blue-600 rounded-lg hover:bg-gray-100 transition-colors"
-                                                    title="Visualizar Contrato"
+                                    {/* Resumo ou Formulário do Responsável */}
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Dados do Responsável Legal (Mãe, Pai ou Tutor)
+                                            </span>
+                                            <label className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600 cursor-pointer">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={editHasGuardian}
+                                                    onChange={e => setEditHasGuardian(e.target.checked)}
+                                                    className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                                />
+                                                <span>Vincular Responsável ao Paciente</span>
+                                            </label>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                                            <div className="sm:col-span-5">
+                                                <label className="text-[11px] font-semibold text-slate-600 block mb-1">Nome do Responsável</label>
+                                                <input
+                                                    type="text"
+                                                    value={editGuardianName}
+                                                    onChange={e => setEditGuardianName(e.target.value)}
+                                                    placeholder="Ex: Maria Silva"
+                                                    className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </div>
+                                            <div className="sm:col-span-3">
+                                                <label className="text-[11px] font-semibold text-slate-600 block mb-1">Parentesco</label>
+                                                <select
+                                                    value={editGuardianRelationship}
+                                                    onChange={e => setEditGuardianRelationship(e.target.value)}
+                                                    className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500"
                                                 >
-                                                    <Edit2 className="w-4 h-4" />
-                                                </button>
+                                                    <option value="Mãe">Mãe</option>
+                                                    <option value="Pai">Pai</option>
+                                                    <option value="Avó/Avô">Avó / Avô</option>
+                                                    <option value="Tutor Legal">Tutor Legal</option>
+                                                    <option value="Cuidador">Cuidador</option>
+                                                    <option value="Outro">Outro</option>
+                                                </select>
                                             </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="p-8 bg-white rounded-xl border border-gray-200 text-center text-gray-400 text-xs">
-                                        Nenhum contrato ou termo emitido para este paciente.
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* TAB 5: FINANCEIRO & PLANOS (Super Intuitivo para Secretária) */}
-                        {activeTab === 'financial' && (
-                            <div className="space-y-6 animate-fade-in">
-                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border border-gray-200 shadow-xs">
-                                    <div>
-                                        <h3 className="font-bold text-gray-900 text-sm">Controle de Planos & Sessões</h3>
-                                        <p className="text-xs text-gray-500">Vincule novos pacotes, renove sessões ou altere o plano deste paciente.</p>
-                                    </div>
-                                    <button
-                                        type="button"
-                                        onClick={handleOpenPlanModal}
-                                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
-                                    >
-                                        <RefreshCw className="w-4 h-4" />
-                                        {patient.plan ? 'Trocar / Renovar Plano' : 'Vincular Primeiro Plano'}
-                                    </button>
-                                </div>
-
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Card do Plano Atual */}
-                                    <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs relative overflow-hidden flex flex-col justify-between">
-                                        <div>
-                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Plano Atual Contratado</span>
-                                            <p className="text-2xl font-extrabold text-gray-900 mb-2">{patient.plan?.name || 'Nenhum plano ativo'}</p>
-                                            <div className="flex flex-wrap items-center gap-2">
-                                                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${patient.plan && patient.plan.remainingSessions > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-600'}`}>
-                                                    {patient.plan ? (patient.plan.remainingSessions > 0 ? 'Ativo' : 'Esgotado') : 'Inativo'}
-                                                </span>
-                                                {patient.plan?.expiresAt && (
-                                                    <span className="text-xs text-gray-500 font-medium">
-                                                        Validade: {new Date(patient.plan.expiresAt).toLocaleDateString('pt-BR')}
-                                                    </span>
-                                                )}
+                                            <div className="sm:col-span-4">
+                                                <label className="text-[11px] font-semibold text-slate-600 block mb-1">WhatsApp do Responsável</label>
+                                                <input
+                                                    type="text"
+                                                    value={editGuardianPhone}
+                                                    onChange={e => setEditGuardianPhone(maskPhone(e.target.value))}
+                                                    placeholder="(00) 00000-0000"
+                                                    className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </div>
+                                            <div className="sm:col-span-6">
+                                                <label className="text-[11px] font-semibold text-slate-600 block mb-1">CPF do Responsável</label>
+                                                <input
+                                                    type="text"
+                                                    maxLength={14}
+                                                    value={editGuardianCpf}
+                                                    onChange={e => setEditGuardianCpf(maskCpf(e.target.value))}
+                                                    placeholder="000.000.000-00"
+                                                    className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                />
+                                            </div>
+                                            <div className="sm:col-span-6">
+                                                <label className="text-[11px] font-semibold text-slate-600 block mb-1">E-mail do Responsável</label>
+                                                <input
+                                                    type="email"
+                                                    value={editGuardianEmail}
+                                                    onChange={e => setEditGuardianEmail(e.target.value)}
+                                                    placeholder="responsavel@email.com"
+                                                    className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                />
                                             </div>
                                         </div>
 
-                                        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-                                            <div>
-                                                <span className="text-xs text-gray-400 block font-medium">Valor Contratado</span>
-                                                <span className="text-sm font-bold text-gray-900">
-                                                    {patient.plan?.totalPaid ? `R$ ${patient.plan.totalPaid.toFixed(2)}` : 'R$ 0,00'}
-                                                </span>
-                                            </div>
-                                            <div>
-                                                <span className="text-xs text-gray-400 block font-medium">Pagamento</span>
-                                                <span className={`text-xs font-bold ${patient.plan?.paymentStatus === 'paid' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                                    {patient.plan?.paymentStatus === 'paid' ? '✓ Quitado' : '⏳ Pendente'}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Card de Saldo de Sessões */}
-                                    <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs flex flex-col justify-between">
-                                        <div>
-                                            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">Saldo de Sessões Restantes</span>
-                                            <div className="flex items-baseline gap-2">
-                                                <span className="text-4xl font-extrabold text-blue-600">
-                                                    {patient.plan?.remainingSessions || 0}
-                                                </span>
-                                                <span className="text-gray-400 text-sm font-semibold">
-                                                    / {patient.plan?.totalSessions || 0} totais
-                                                </span>
-                                            </div>
-                                            {patient.plan && (
-                                                <div className="w-full bg-gray-100 rounded-full h-2.5 mt-4 overflow-hidden">
-                                                    <div
-                                                        className="bg-blue-600 h-2.5 rounded-full transition-all"
-                                                        style={{ width: `${((patient.plan.remainingSessions || 0) / (patient.plan.totalSessions || 1)) * 100}%` }}
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end gap-2">
+                                        <div className="flex justify-end pt-1">
                                             <button
                                                 type="button"
-                                                onClick={async () => {
-                                                    if (!patient.plan) return;
-                                                    const newRemaining = (patient.plan.remainingSessions || 0) + 1;
-                                                    const updatedPlan = { ...patient.plan, remainingSessions: newRemaining };
-                                                    await patientsApi.update(patient.id, { plan: updatedPlan });
-                                                    setPatient(prev => ({ ...prev, plan: updatedPlan }));
-                                                    if (onUpdatePatient) onUpdatePatient({ id: patient.id, plan: updatedPlan });
-                                                    toast.success('+1 Sessão adicionada ao saldo!');
-                                                }}
-                                                className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition-all cursor-pointer"
+                                                onClick={handleSaveInfo}
+                                                disabled={savingInfo}
+                                                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                                             >
-                                                +1 Sessão Bônus
+                                                {savingInfo ? 'Salvando...' : 'Salvar Dados do Responsável'}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Orientações Domiciliares (Home Care) */}
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center">
+                                            <label className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                                Orientações e Exercícios para Casa (Home Care)
+                                            </label>
+                                            <span className="text-[11px] text-slate-400">Recomendações práticas para os pais</span>
+                                        </div>
+                                        <textarea
+                                            rows={5}
+                                            value={editHomeCareInstructions}
+                                            onChange={e => setEditHomeCareInstructions(e.target.value)}
+                                            placeholder="Ex: Realizar alongamento de cadeia posterior 2x ao dia por 30 segundos. Manter postura alinhada durante os estudos..."
+                                            className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="button"
+                                                onClick={handleSaveInfo}
+                                                disabled={savingInfo}
+                                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                                            >
+                                                {savingInfo ? 'Salvando...' : 'Salvar Orientações'}
                                             </button>
                                         </div>
                                     </div>
@@ -1119,44 +1185,95 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                             </div>
                         )}
 
-                        {/* TAB 6: DADOS PESSOAIS (Com Edição Direta e Clara) */}
-                        {activeTab === 'info' && (
-                            <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-xs animate-fade-in">
-                                <div className="flex justify-between items-center mb-6 border-b border-gray-100 pb-3">
+                        {/* ======================================================== */}
+                        {/* TAB 5: DOCUMENTOS & CONTRATOS                            */}
+                        {/* ======================================================== */}
+                        {activeTab === 'contracts' && (
+                            <div className="space-y-4 animate-fade-in max-w-4xl">
+                                <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
                                     <div>
-                                        <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">
-                                            <User className="w-5 h-5 text-blue-600" />
-                                            Dados Cadastrais do Paciente
-                                        </h3>
-                                        <p className="text-xs text-gray-500">Informações pessoais e endereço completo para prontuário.</p>
+                                        <h3 className="font-bold text-slate-900 text-sm">Contratos & Documentos Assinados</h3>
+                                        <p className="text-xs text-slate-500">Termos de consentimento e contratos de tratamento.</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setIsDocGenModalOpen(true)}
+                                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs transition-all cursor-pointer"
+                                    >
+                                        + Gerar Novo Documento
+                                    </button>
+                                </div>
+
+                                {contracts.length === 0 ? (
+                                    <div className="p-8 bg-white rounded-xl border border-slate-200 text-center text-slate-400 text-xs">
+                                        Nenhum contrato gerado para este paciente.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {contracts.map(c => (
+                                            <div key={c.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex justify-between items-center">
+                                                <div>
+                                                    <p className="font-bold text-sm text-slate-900">{c.planName || 'Termo de Atendimento'}</p>
+                                                    <p className="text-xs text-slate-500">{c.createdAt ? new Date(c.createdAt).toLocaleDateString('pt-BR') : ''}</p>
+                                                </div>
+                                                <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${c.status === 'signed' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                                                    {c.status === 'signed' ? 'Assinado' : 'Pendente'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* ======================================================== */}
+                        {/* TAB 6: FINANCEIRO & PLANOS                               */}
+                        {/* ======================================================== */}
+                        {activeTab === 'financial' && (
+                            <div className="space-y-4 animate-fade-in max-w-4xl">
+                                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-3">
+                                    <h3 className="font-bold text-slate-900 text-base">Plano de Tratamento & Saldo</h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl">
+                                        <div>
+                                            <span className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Plano Contratado</span>
+                                            <p className="text-sm font-bold text-slate-900">{patient.plan?.name || 'Particular / Avulso'}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Sessões Restantes</span>
+                                            <p className="text-sm font-bold text-blue-600">{patient.plan?.remainingSessions || 0} de {patient.plan?.totalSessions || 0}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Validade</span>
+                                            <p className="text-sm text-slate-700">{patient.plan?.expiresAt || 'Sem expiração'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ======================================================== */}
+                        {/* TAB 7: DADOS PESSOAIS & CADASTRAIS COMPLETOS             */}
+                        {/* ======================================================== */}
+                        {activeTab === 'info' && (
+                            <div className="space-y-6 animate-fade-in max-w-4xl">
+                                <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                                    <div>
+                                        <h3 className="font-bold text-slate-900 text-sm">Ficha Cadastral do Paciente</h3>
+                                        <p className="text-xs text-slate-500">Dados pessoais, contatos, convênio, endereço e responsáveis.</p>
                                     </div>
                                     {!isEditingInfo ? (
                                         <button
                                             type="button"
-                                            onClick={() => {
-                                                setEditName(patient.name);
-                                                setEditCpf(patient.cpf || '');
-                                                setEditPhone(patient.phone);
-                                                setEditBirthDate(patient.birthDate || '');
-                                                setEditCep(patient.cep || '');
-                                                setEditStreet(patient.street || '');
-                                                setEditNumber(patient.number || '');
-                                                setEditBairro(patient.bairro || '');
-                                                setEditCity(patient.city || '');
-                                                setEditComplement(patient.complement || '');
-                                                setIsEditingInfo(true);
-                                            }}
-                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                                            onClick={() => setIsEditingInfo(true)}
+                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                                         >
-                                            <Edit2 className="w-3.5 h-3.5" />
-                                            Editar Dados
+                                            Editar Ficha
                                         </button>
                                     ) : (
                                         <div className="flex items-center gap-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setIsEditingInfo(false)}
-                                                className="px-3.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                                                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                                             >
                                                 Cancelar
                                             </button>
@@ -1164,9 +1281,8 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                                                 type="button"
                                                 onClick={handleSaveInfo}
                                                 disabled={savingInfo}
-                                                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
+                                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                                             >
-                                                <Save className="w-3.5 h-3.5" />
                                                 {savingInfo ? 'Salvando...' : 'Salvar Alterações'}
                                             </button>
                                         </div>
@@ -1174,424 +1290,526 @@ export const PatientDetailView: React.FC<PatientDetailViewProps> = ({
                                 </div>
 
                                 {!isEditingInfo ? (
-                                    /* Modo Visualização */
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div className="space-y-4">
-                                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Identificação</h4>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Nome Completo</label>
-                                                <p className="text-gray-900 font-semibold bg-gray-50 px-3.5 py-2.5 rounded-xl border border-gray-100 text-sm">{patient.name}</p>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-3">
+                                    /* Modo Visualização Clean */
+                                    <div className="space-y-5">
+                                        {/* Card 1: Identificação */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">1. Identificação & Documentação</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                                 <div>
-                                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">CPF</label>
-                                                    <p className="text-gray-900 font-semibold bg-gray-50 px-3.5 py-2.5 rounded-xl border border-gray-100 text-sm">{patient.cpf || '-'}</p>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Nome Completo</span>
+                                                    <p className="text-sm font-semibold text-slate-900">{patient.name}</p>
                                                 </div>
                                                 <div>
-                                                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Nascimento</label>
-                                                    <p className="text-gray-900 font-semibold bg-gray-50 px-3.5 py-2.5 rounded-xl border border-gray-100 text-sm">
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">CPF</span>
+                                                    <p className="text-sm font-mono text-slate-900">{patient.cpf || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">RG</span>
+                                                    <p className="text-sm text-slate-900">{patient.rg || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">CNS (Cartão Nacional de Saúde)</span>
+                                                    <p className="text-sm font-mono text-slate-900">{patient.cns || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Data de Nascimento</span>
+                                                    <p className="text-sm text-slate-900">
                                                         {patient.birthDate ? new Date(patient.birthDate + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}
                                                     </p>
                                                 </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Estado Civil / Sexo</span>
+                                                    <p className="text-sm text-slate-900">{patient.maritalStatus || '-'} / {patient.gender || '-'}</p>
+                                                </div>
+                                                <div className="sm:col-span-3">
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Breve Diagnóstico Clínico</span>
+                                                    <p className="text-sm text-slate-900">{patient.briefDiagnosis || 'Não informado'}</p>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        <div className="space-y-4">
-                                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Contato & Localização</h4>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Telefone / WhatsApp</label>
-                                                <p className="text-gray-900 font-semibold bg-gray-50 px-3.5 py-2.5 rounded-xl border border-gray-100 text-sm">{patient.phone}</p>
+                                        {/* Card 2: Contatos */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">2. Contatos & Comunicação</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Celular / WhatsApp</span>
+                                                    <p className="text-sm font-mono text-slate-900">{patient.phone ? formatPhone(patient.phone) : '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Telefone Fixo</span>
+                                                    <p className="text-sm font-mono text-slate-900">{patient.landlinePhone ? formatPhone(patient.landlinePhone) : '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">E-mail</span>
+                                                    <p className="text-sm text-slate-900">{patient.email || '-'}</p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Endereço Completo</label>
-                                                <p className="text-gray-900 font-semibold bg-gray-50 px-3.5 py-2.5 rounded-xl border border-gray-100 text-sm">{patient.address || '-'}</p>
+                                        </div>
+
+                                        {/* Card 3: Convênio */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">3. Convênio de Saúde</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Convênio</span>
+                                                    <p className="text-sm font-bold text-slate-900">
+                                                        {agreements.find(a => a.id === patient.agreementId)?.name || 'Particular'}
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Número da Carteirinha</span>
+                                                    <p className="text-sm font-mono text-slate-900">{patient.insuranceCardNumber || '-'}</p>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[11px] font-bold text-slate-400 block mb-1">Validade</span>
+                                                    <p className="text-sm text-slate-900">{patient.insuranceCardExpiry || '-'}</p>
+                                                </div>
                                             </div>
+                                        </div>
+
+                                        {/* Card 4: Endereço */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">4. Endereço</h4>
+                                            <p className="text-sm font-semibold text-slate-800">{patient.address || 'Endereço não cadastrado'}</p>
+                                        </div>
+
+                                        {/* Card 5: Responsável Legal */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">5. Responsável Legal / Pediátrico</h4>
+                                            {patient.hasGuardian ? (
+                                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                    <div>
+                                                        <span className="text-[11px] font-bold text-slate-400 block mb-1">Nome do Responsável</span>
+                                                        <p className="text-sm font-bold text-slate-900">{patient.guardianName}</p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-[11px] font-bold text-slate-400 block mb-1">Parentesco</span>
+                                                        <p className="text-sm text-slate-900">{patient.guardianRelationship}</p>
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-[11px] font-bold text-slate-400 block mb-1">Celular do Responsável</span>
+                                                        <p className="text-sm font-mono text-slate-900">{patient.guardianPhone ? formatPhone(patient.guardianPhone) : '-'}</p>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <p className="text-xs text-slate-500">Paciente maior de idade sem responsável legal vinculado.</p>
+                                            )}
                                         </div>
                                     </div>
                                 ) : (
-                                    /* Modo Edição */
-                                    <form onSubmit={handleSaveInfo} className="space-y-5">
-                                        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                                            <div className="md:col-span-6">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Nome Completo *</label>
-                                                <input
-                                                    type="text"
-                                                    required
-                                                    value={editName}
-                                                    onChange={e => setEditName(e.target.value)}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
-
-                                            <div className="md:col-span-3">
-                                                <div className="flex justify-between items-center mb-1.5">
-                                                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">CPF</label>
-                                                    {editCpf.replace(/\D/g, '').length === 11 && (
-                                                        validateCpf(editCpf) ? (
-                                                            <span className="text-[10px] font-bold text-emerald-600">✓ Válido</span>
-                                                        ) : (
-                                                            <span className="text-[10px] font-bold text-red-500">⚠️ Inválido</span>
-                                                        )
-                                                    )}
+                                    /* Modo Edição Completo */
+                                    <form onSubmit={handleSaveInfo} className="space-y-6">
+                                        {/* Seção 1: Identificação */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">1. Identificação & Documentação</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                                                <div className="sm:col-span-8">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Nome Completo *</label>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        value={editName}
+                                                        onChange={e => setEditName(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                    />
                                                 </div>
-                                                <input
-                                                    type="text"
-                                                    maxLength={14}
-                                                    value={editCpf}
-                                                    onChange={e => setEditCpf(maskCpf(e.target.value))}
-                                                    placeholder="000.000.000-00"
-                                                    className={`w-full px-3.5 py-2 border rounded-xl focus:ring-2 outline-none text-sm ${
-                                                        editCpf.replace(/\D/g, '').length === 11
-                                                            ? validateCpf(editCpf)
-                                                                ? 'border-emerald-500 bg-emerald-50/20 text-gray-900 focus:ring-emerald-500'
-                                                                : 'border-red-500 bg-red-50/20 text-red-900 focus:ring-red-500'
-                                                            : 'border-gray-200 bg-white text-gray-900 focus:ring-blue-500'
-                                                    }`}
-                                                />
+
+                                                <div className="sm:col-span-4 flex items-center pt-5">
+                                                    <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={editIsSocialName}
+                                                            onChange={e => setEditIsSocialName(e.target.checked)}
+                                                            className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                                        />
+                                                        <span>É nome social</span>
+                                                    </label>
+                                                </div>
+
+                                                {editIsSocialName && (
+                                                    <div className="sm:col-span-12">
+                                                        <label className="text-xs font-semibold text-slate-600 block mb-1">Nome Social</label>
+                                                        <input
+                                                            type="text"
+                                                            value={editSocialName}
+                                                            onChange={e => setEditSocialName(e.target.value)}
+                                                            className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                        />
+                                                    </div>
+                                                )}
+
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">CPF</label>
+                                                    <input
+                                                        type="text"
+                                                        maxLength={14}
+                                                        value={editCpf}
+                                                        onChange={e => setEditCpf(maskCpf(e.target.value))}
+                                                        placeholder="000.000.000-00"
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">RG</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editRg}
+                                                        onChange={e => setEditRg(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">CNS (Cartão SUS)</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editCns}
+                                                        onChange={e => setEditCns(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Data de Nascimento</label>
+                                                    <input
+                                                        type="date"
+                                                        value={editBirthDate}
+                                                        onChange={e => setEditBirthDate(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Estado Civil</label>
+                                                    <select
+                                                        value={editMaritalStatus}
+                                                        onChange={e => setEditMaritalStatus(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    >
+                                                        <option value="">Selecione</option>
+                                                        <option value="Solteiro(a)">Solteiro(a)</option>
+                                                        <option value="Casado(a)">Casado(a)</option>
+                                                        <option value="Divorciado(a)">Divorciado(a)</option>
+                                                        <option value="Viúvo(a)">Viúvo(a)</option>
+                                                        <option value="União Estável">União Estável</option>
+                                                    </select>
+                                                </div>
+
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Sexo / Gênero</label>
+                                                    <select
+                                                        value={editGender}
+                                                        onChange={e => setEditGender(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    >
+                                                        <option value="">Selecione</option>
+                                                        <option value="Feminino">Feminino</option>
+                                                        <option value="Masculino">Masculino</option>
+                                                        <option value="Outro">Outro</option>
+                                                    </select>
+                                                </div>
+
+                                                <div className="sm:col-span-12">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Breve Diagnóstico Clínico</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editBriefDiagnosis}
+                                                        onChange={e => setEditBriefDiagnosis(e.target.value)}
+                                                        placeholder="Ex: Lombalgia crônica mecânica-postural"
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Seção 2: Contatos */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">2. Contatos & Comunicação</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Celular / WhatsApp *</label>
+                                                    <input
+                                                        type="text"
+                                                        required
+                                                        value={editPhone}
+                                                        onChange={e => setEditPhone(maskPhone(e.target.value))}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Telefone Fixo</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editLandlinePhone}
+                                                        onChange={e => setEditLandlinePhone(maskPhone(e.target.value))}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">E-mail</label>
+                                                    <input
+                                                        type="email"
+                                                        value={editEmail}
+                                                        onChange={e => setEditEmail(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Seção 3: Convênio */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">3. Convênio de Saúde</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Convênio</label>
+                                                    <select
+                                                        value={editAgreementId}
+                                                        onChange={e => setEditAgreementId(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    >
+                                                        <option value="">Particular / Próprio</option>
+                                                        {agreements.map(a => (
+                                                            <option key={a.id} value={a.id}>{a.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Número da Carteirinha</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editInsuranceCardNumber}
+                                                        onChange={e => setEditInsuranceCardNumber(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Validade da Carteirinha</label>
+                                                    <input
+                                                        type="date"
+                                                        value={editInsuranceCardExpiry}
+                                                        onChange={e => setEditInsuranceCardExpiry(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Seção 4: Endereço */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">4. Endereço</h4>
+                                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-4">
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">CEP (Busca Automática)</label>
+                                                    <input
+                                                        type="text"
+                                                        maxLength={9}
+                                                        value={editCep}
+                                                        onChange={e => handleCepSearch(e.target.value)}
+                                                        placeholder="00000-000"
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-6">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Cidade</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editCity}
+                                                        onChange={e => setEditCity(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-2">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Estado</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editState}
+                                                        onChange={e => setEditState(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900 uppercase"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-6">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Rua / Logradouro</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editStreet}
+                                                        onChange={e => setEditStreet(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-2">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Número</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editNumber}
+                                                        onChange={e => setEditNumber(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                                <div className="sm:col-span-4">
+                                                    <label className="text-xs font-semibold text-slate-600 block mb-1">Bairro</label>
+                                                    <input
+                                                        type="text"
+                                                        value={editBairro}
+                                                        onChange={e => setEditBairro(e.target.value)}
+                                                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Seção 5: Responsável Legal & Pediátrico */}
+                                        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                                            <div className="flex justify-between items-center">
+                                                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">5. Responsável Legal / Pediátrico (Araranguá)</h4>
+                                                <label className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={editHasGuardian}
+                                                        onChange={e => setEditHasGuardian(e.target.checked)}
+                                                        className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                                    />
+                                                    <span>Paciente é Criança/Adolescente/Dependente</span>
+                                                </label>
                                             </div>
 
-                                            <div className="md:col-span-3">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Data de Nascimento</label>
-                                                <input
-                                                    type="date"
-                                                    value={editBirthDate}
-                                                    onChange={e => setEditBirthDate(e.target.value)}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
+                                            {editHasGuardian && (
+                                                <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 bg-indigo-50/40 p-4 rounded-xl border border-indigo-100">
+                                                    <div className="sm:col-span-6">
+                                                        <label className="text-xs font-semibold text-slate-600 block mb-1">Nome do Responsável *</label>
+                                                        <input
+                                                            type="text"
+                                                            value={editGuardianName}
+                                                            onChange={e => setEditGuardianName(e.target.value)}
+                                                            className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-3">
+                                                        <label className="text-xs font-semibold text-slate-600 block mb-1">Parentesco</label>
+                                                        <select
+                                                            value={editGuardianRelationship}
+                                                            onChange={e => setEditGuardianRelationship(e.target.value)}
+                                                            className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                        >
+                                                            <option value="Mãe">Mãe</option>
+                                                            <option value="Pai">Pai</option>
+                                                            <option value="Avó/Avô">Avó / Avô</option>
+                                                            <option value="Tutor Legal">Tutor Legal</option>
+                                                            <option value="Cuidador">Cuidador</option>
+                                                            <option value="Outro">Outro</option>
+                                                        </select>
+                                                    </div>
+                                                    <div className="sm:col-span-3">
+                                                        <label className="text-xs font-semibold text-slate-600 block mb-1">WhatsApp do Responsável</label>
+                                                        <input
+                                                            type="text"
+                                                            value={editGuardianPhone}
+                                                            onChange={e => setEditGuardianPhone(maskPhone(e.target.value))}
+                                                            className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-6">
+                                                        <label className="text-xs font-semibold text-slate-600 block mb-1">CPF do Responsável</label>
+                                                        <input
+                                                            type="text"
+                                                            maxLength={14}
+                                                            value={editGuardianCpf}
+                                                            onChange={e => setEditGuardianCpf(maskCpf(e.target.value))}
+                                                            className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-6">
+                                                        <label className="text-xs font-semibold text-slate-600 block mb-1">E-mail do Responsável</label>
+                                                        <input
+                                                            type="email"
+                                                            value={editGuardianEmail}
+                                                            onChange={e => setEditGuardianEmail(e.target.value)}
+                                                            className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
 
-                                            <div className="md:col-span-4">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Telefone / WhatsApp *</label>
-                                                <input
-                                                    type="text"
-                                                    required
-                                                    value={editPhone}
-                                                    onChange={e => setEditPhone(maskPhone(e.target.value))}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
-
-                                            <div className="md:col-span-4">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">CEP (Busca Automática)</label>
-                                                <input
-                                                    type="text"
-                                                    maxLength={9}
-                                                    value={editCep}
-                                                    onChange={e => handleCepSearch(e.target.value)}
-                                                    placeholder="00000-000"
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
-
-                                            <div className="md:col-span-4">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Cidade</label>
-                                                <input
-                                                    type="text"
-                                                    value={editCity}
-                                                    onChange={e => setEditCity(e.target.value)}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
-
-                                            <div className="md:col-span-6">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Rua / Logradouro</label>
-                                                <input
-                                                    type="text"
-                                                    value={editStreet}
-                                                    onChange={e => setEditStreet(e.target.value)}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
-
-                                            <div className="md:col-span-2">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Número</label>
-                                                <input
-                                                    type="text"
-                                                    value={editNumber}
-                                                    onChange={e => setEditNumber(e.target.value)}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
-
-                                            <div className="md:col-span-4">
-                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-1.5">Bairro</label>
-                                                <input
-                                                    type="text"
-                                                    value={editBairro}
-                                                    onChange={e => setEditBairro(e.target.value)}
-                                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm text-gray-900"
-                                                />
-                                            </div>
+                                        <div className="flex justify-end gap-2 pt-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsEditingInfo(false)}
+                                                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                disabled={savingInfo}
+                                                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+                                            >
+                                                {savingInfo ? 'Salvando...' : 'Salvar Alterações'}
+                                            </button>
                                         </div>
                                     </form>
                                 )}
                             </div>
                         )}
                     </div>
-
-                    {/* Modais Clínicos */}
-                    {isEvalModalOpen && (
-                        <EvaluationModal
-                            isOpen={isEvalModalOpen}
-                            onClose={() => { setIsEvalModalOpen(false); setSelectedEvalToEdit(null); }}
-                            patientId={patient.id}
-                            existingEvaluation={selectedEvalToEdit}
-                            currentUnit={currentUnit}
-                            onSave={(savedEval) => {
-                                setEvaluations(prev => {
-                                    const idx = prev.findIndex(e => e.id === savedEval.id);
-                                    if (idx >= 0) {
-                                        const copy = [...prev];
-                                        copy[idx] = savedEval;
-                                        return copy;
-                                    }
-                                    return [savedEval, ...prev];
-                                });
-                            }}
-                        />
-                    )}
-
-                    {isEvolModalOpen && (
-                        <EvolutionModal
-                            isOpen={isEvolModalOpen}
-                            onClose={() => { setIsEvolModalOpen(false); setSelectedEvolToEdit(null); }}
-                            patientId={patient.id}
-                            existingEvolution={selectedEvolToEdit}
-                            currentUnit={currentUnit}
-                            onSave={(savedEvol) => {
-                                setEvolutions(prev => {
-                                    const idx = prev.findIndex(e => e.id === savedEvol.id);
-                                    if (idx >= 0) {
-                                        const copy = [...prev];
-                                        copy[idx] = savedEvol;
-                                        return copy;
-                                    }
-                                    return [savedEvol, ...prev];
-                                });
-                            }}
-                        />
-                    )}
-
-                    {isContractModalOpen && (
-                        <ContractModal
-                            isOpen={isContractModalOpen}
-                            onClose={() => { setIsContractModalOpen(false); setSelectedContractToView(null); }}
-                            patientId={patient.id}
-                            existingContract={selectedContractToView}
-                            currentUnit={currentUnit}
-                            onSave={(savedContract) => {
-                                setContracts(prev => {
-                                    const idx = prev.findIndex(c => c.id === savedContract.id);
-                                    if (idx >= 0) {
-                                        const copy = [...prev];
-                                        copy[idx] = savedContract;
-                                        return copy;
-                                    }
-                                    return [savedContract, ...prev];
-                                });
-                            }}
-                        />
-                    )}
-
-                    {isDocGenModalOpen && (
-                        <DocumentGeneratorModal
-                            isOpen={isDocGenModalOpen}
-                            onClose={() => setIsDocGenModalOpen(false)}
-                            patientId={patient.id}
-                            currentUnit={currentUnit}
-                        />
-                    )}
                 </div>
             </div>
 
-            {/* Modal Dedicado de Vincular / Renovar Plano (Super Intuitivo) */}
-            {isPlanModalOpen && (
-                <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/50 backdrop-blur-xs transition-opacity" onClick={() => setIsPlanModalOpen(false)} />
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative z-10 overflow-hidden animate-fade-in border border-gray-100">
-                        <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-5 text-white flex justify-between items-center">
-                            <div>
-                                <h3 className="text-base font-bold">
-                                    Vincular / Renovar Plano do Paciente
-                                </h3>
-                                <p className="text-xs text-emerald-100 mt-0.5">Paciente: <strong>{patient.name}</strong></p>
-                            </div>
-                            <button onClick={() => setIsPlanModalOpen(false)} className="text-white/80 hover:text-white p-1 rounded-lg">
-                                <X className="w-5 h-5" />
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleSavePlan} className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1.5">
-                                    Escolha o Pacote / Plano
-                                </label>
-                                <select
-                                    value={selectedPlanTemplateId}
-                                    onChange={e => handleSelectTemplate(e.target.value)}
-                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer"
-                                >
-                                    <option value="avulso">Particular / Avulso (Sem Plano)</option>
-                                    <optgroup label="Planos e Pacotes Cadastrados">
-                                        {planTemplates.map(t => (
-                                            <option key={t.id} value={t.id}>
-                                                {t.name} ({t.sessions} sessões) - R$ {t.price.toFixed(2)}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                    <option value="custom">Personalizado (Outro Nome)</option>
-                                </select>
-                            </div>
-
-                            {selectedPlanTemplateId === 'custom' && (
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Nome do Plano Personalizado</label>
-                                    <input
-                                        type="text"
-                                        required
-                                        value={customPlanName}
-                                        onChange={e => setCustomPlanName(e.target.value)}
-                                        placeholder="Ex: Pacote Especial 15 Sessões"
-                                        className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                                    />
-                                </div>
-                            )}
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Total de Sessões</label>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        value={planTotalSessions}
-                                        onChange={e => {
-                                            const v = Number(e.target.value);
-                                            setPlanTotalSessions(v);
-                                            setPlanRemainingSessions(v);
-                                        }}
-                                        className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 outline-none focus:ring-2 focus:ring-emerald-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Saldo Inicial</label>
-                                    <input
-                                        type="number"
-                                        min={0}
-                                        value={planRemainingSessions}
-                                        onChange={e => setPlanRemainingSessions(Number(e.target.value))}
-                                        className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm font-bold text-emerald-600 outline-none focus:ring-2 focus:ring-emerald-500"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Valor do Pacote (R$)</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        value={planTotalPaid}
-                                        onChange={e => setPlanTotalPaid(Number(e.target.value))}
-                                        className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 outline-none focus:ring-2 focus:ring-emerald-500"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Validade (Dias)</label>
-                                    <input
-                                        type="number"
-                                        value={planExpiryDays}
-                                        onChange={e => setPlanExpiryDays(Number(e.target.value))}
-                                        className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Forma de Pagamento</label>
-                                    <select
-                                        value={planPaymentMethod}
-                                        onChange={e => setPlanPaymentMethod(e.target.value)}
-                                        className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-xs font-semibold bg-gray-50 focus:bg-white outline-none cursor-pointer"
-                                    >
-                                        <option value="pix">Pix</option>
-                                        <option value="credit_card">Cartão de Crédito</option>
-                                        <option value="debit_card">Cartão de Débito</option>
-                                        <option value="cash">Dinheiro</option>
-                                        <option value="boleto">Boleto</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-1">Status Pagamento</label>
-                                    <select
-                                        value={planPaymentStatus}
-                                        onChange={e => setPlanPaymentStatus(e.target.value as 'paid' | 'pending')}
-                                        className={`w-full px-3.5 py-2 border rounded-xl text-xs font-bold outline-none cursor-pointer ${planPaymentStatus === 'paid' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}
-                                    >
-                                        <option value="paid">✓ Pago (Confirmado)</option>
-                                        <option value="pending">⏳ Pagamento Pendente</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div className="pt-3 flex justify-end gap-2 border-t border-gray-100">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsPlanModalOpen(false)}
-                                    className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl cursor-pointer"
-                                >
-                                    Cancelar
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={savingPlan}
-                                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer disabled:opacity-50"
-                                >
-                                    {savingPlan ? 'Salvando...' : 'Salvar e Ativar Plano'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+            {/* Modais Clínicos */}
+            {isEvalModalOpen && (
+                <EvaluationModal
+                    isOpen={isEvalModalOpen}
+                    onClose={() => { setIsEvalModalOpen(false); setSelectedEvalToEdit(null); }}
+                    patientId={patient.id}
+                    patientName={patient.name}
+                    existingEvaluation={selectedEvalToEdit}
+                    currentUnit={currentUnit}
+                    onSave={(savedEval) => {
+                        setEvaluations(prev => {
+                            const idx = prev.findIndex(e => e.id === savedEval.id);
+                            if (idx >= 0) {
+                                const copy = [...prev];
+                                copy[idx] = savedEval;
+                                return copy;
+                            }
+                            return [savedEval, ...prev];
+                        });
+                    }}
+                />
             )}
 
-            {/* Camera Overlay Modal */}
-            {showCamera && (
-                <div className="fixed inset-0 z-[80] bg-black bg-opacity-90 flex flex-col items-center justify-center p-4">
-                    <div className="relative w-full max-w-md bg-black rounded-xl overflow-hidden shadow-2xl">
-                        <video
-                            ref={videoRef}
-                            autoPlay
-                            playsInline
-                            onLoadedMetadata={() => videoRef.current?.play()}
-                            className="w-full h-auto bg-gray-900"
-                        />
-                        <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-8">
-                            <button
-                                onClick={handleStopCamera}
-                                className="bg-white/20 hover:bg-white/30 text-white rounded-full p-3 backdrop-blur-sm transition-colors"
-                            >
-                                <X className="w-6 h-6" />
-                            </button>
-                            <button
-                                onClick={handleCapture}
-                                className="bg-white rounded-full p-4 hover:scale-105 transition-transform border-4 border-gray-200"
-                            >
-                                <div className="w-12 h-12 bg-transparent rounded-full border-2 border-black/10" />
-                            </button>
-                        </div>
-                    </div>
-                    <p className="text-white mt-4 text-sm font-medium">Ajuste o rosto no quadro e clique no botão central para capturar.</p>
-                </div>
+            {isEvolModalOpen && (
+                <EvolutionModal
+                    isOpen={isEvolModalOpen}
+                    onClose={() => { setIsEvolModalOpen(false); setSelectedEvolToEdit(null); }}
+                    patientId={patient.id}
+                    patientName={patient.name}
+                    existingEvolution={selectedEvolToEdit}
+                    currentUnit={currentUnit}
+                    onSave={(savedEvol) => {
+                        setEvolutions(prev => {
+                            const idx = prev.findIndex(e => e.id === savedEvol.id);
+                            if (idx >= 0) {
+                                const copy = [...prev];
+                                copy[idx] = savedEvol;
+                                return copy;
+                            }
+                            return [savedEvol, ...prev];
+                        });
+                    }}
+                />
             )}
 
-            {/* Session Signature Modal */}
-            {showSignatureModal && (
-                <SignatureModal
-                    title="Assinar Sessão"
-                    description="Desenhe sua assinatura ou tire uma foto para confirmar a sessão."
-                    onConfirm={handleConfirmSignature}
-                    onCancel={() => { setShowSignatureModal(false); setSessionToSign(null); }}
+            {isDocGenModalOpen && (
+                <DocumentGeneratorModal
+                    isOpen={isDocGenModalOpen}
+                    onClose={() => setIsDocGenModalOpen(false)}
+                    patient={patient}
+                    currentUnit={currentUnit}
+                    unitName={unitName}
                 />
             )}
         </div>

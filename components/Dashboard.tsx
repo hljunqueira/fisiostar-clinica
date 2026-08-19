@@ -48,7 +48,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         const [patientsData, sessionsData, revenuesData] = await Promise.all([
           patientsApi.getAll(),
           sessionsApi.getAll(),
-          revenuesApi.getAll({ unitId: currentUnit }) // Fetch revenues for current unit
+          revenuesApi.getAll(currentUnit === 'ALL' ? {} : { unitId: currentUnit }) // Fetch revenues for current unit
         ]);
         setPatients(patientsData);
         setSessions(sessionsData);
@@ -60,13 +60,14 @@ const Dashboard: React.FC<DashboardProps> = ({
       }
     }
     loadData();
-  }, []);
+  }, [currentUnit]);
 
   // Calculate metrics
-  const filteredSessions = sessions.filter(s => s.unitId === currentUnit);
+  const filteredSessions = sessions.filter(s => currentUnit === 'ALL' ? true : s.unitId === currentUnit);
   const todaySessions = filteredSessions.filter(s => s.date === new Date().toISOString().split('T')[0]).length;
 
-  const activePatients = patients.filter(p => p.status === 'Active').length;
+  const filteredPatients = patients.filter(p => currentUnit === 'ALL' ? true : p.unitId === currentUnit);
+  const activePatients = filteredPatients.filter(p => p.status === 'Active').length;
 
   // Calculate monthly revenue from completed sessions
   const thisMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
@@ -99,7 +100,7 @@ const Dashboard: React.FC<DashboardProps> = ({
     const dateStr = date.toISOString().split('T')[0];
     const dayName = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][date.getDay()];
     const count = sessions.filter(s =>
-      s.unitId === currentUnit &&
+      (currentUnit === 'ALL' ? true : s.unitId === currentUnit) &&
       s.date === dateStr &&
       s.status === 'Realizada'
     ).length;
@@ -108,7 +109,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   });
 
   // Get patients with remaining sessions, sorted by expiration
-  const patientsWithPlans = patients
+  const patientsWithPlans = filteredPatients
     .filter(p => p.plan && p.plan.remainingSessions !== undefined)
     .sort((a, b) => {
       const dateA = new Date(a.plan!.expiresAt).getTime();

@@ -3,9 +3,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { UnitId, Session, Patient, Professional, Unit, SessionStatus } from '../types';
+import { UnitId, Session, Patient, Professional, Unit, SessionStatus, Agreement } from '../types';
 import AppointmentModal from './AppointmentModal';
-import { sessionsApi, patientsApi, professionalsApi, unitsApi } from '../src/services/api';
+import { SessionQuickModal } from './Calendar/SessionQuickModal';
+import { sessionsApi, patientsApi, professionalsApi, unitsApi, agreementsApi } from '../src/services/api';
 import toast from 'react-hot-toast';
 import CalendarHeader, { ViewMode } from './Calendar/CalendarHeader';
 import DayView from './Calendar/DayView';
@@ -24,7 +25,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     const scheduleConfig = getSavedScheduleConfig();
 
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [viewMode, setViewMode] = useState<ViewMode>(scheduleConfig.defaultView || 'week'); // Default to week view like ZenFisio
+    const [viewMode, setViewMode] = useState<ViewMode>(scheduleConfig.defaultView || 'week'); // Default to week view
 
     // Filters
     const [filterProf, setFilterProf] = useState<string>(searchParams.get('professionalId') || 'all');
@@ -38,9 +39,12 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     const [sessions, setSessions] = useState<Session[]>([]);
     const [patients, setPatients] = useState<Patient[]>([]);
     const [professionals, setProfessionals] = useState<Professional[]>([]);
+    const [agreements, setAgreements] = useState<Agreement[]>([]);
     const [unit, setUnit] = useState<Unit | null>(null);
 
+    // Modal States
     const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
+    const [quickModalSession, setQuickModalSession] = useState<Session | null>(null);
     const [editingSession, setEditingSession] = useState<Session | null>(null);
     const [modalInitialDate, setModalInitialDate] = useState<string | undefined>(undefined);
     const [modalInitialTime, setModalInitialTime] = useState<string | undefined>(undefined);
@@ -51,7 +55,14 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
         if (searchParams.get('action') === 'new') {
             setIsAppointmentModalOpen(true);
         }
-    }, [searchParams]);
+        const paramPatientId = searchParams.get('patientId');
+        if (paramPatientId && patients.length > 0) {
+            const found = patients.find(p => p.id === paramPatientId);
+            if (found) {
+                setFilterPatient(found.name);
+            }
+        }
+    }, [searchParams, patients]);
 
     const [units, setUnits] = useState<Unit[]>([]);
 
@@ -62,14 +73,16 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
 
     async function loadData() {
         try {
-            const [sessionsData, patientsData, professionalsData, unitsData] = await Promise.all([
+            const [sessionsData, patientsData, professionalsData, unitsData, agreementsData] = await Promise.all([
                 sessionsApi.getAll(),
                 patientsApi.getAll(),
                 professionalsApi.getAll(),
-                unitsApi.getAll()
+                unitsApi.getAll(),
+                agreementsApi.getAll().catch(() => [])
             ]);
 
             setUnits(unitsData);
+            setAgreements(agreementsData);
 
             if (currentUnit === 'ALL') {
                 setSessions(sessionsData);
@@ -101,8 +114,18 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     });
 
     const handleEditSession = (session: Session) => {
+        setQuickModalSession(session);
+    };
+
+    const handleOpenFullAppointmentModal = (session: Session) => {
+        setQuickModalSession(null);
         setEditingSession(session);
         setIsAppointmentModalOpen(true);
+    };
+
+    const handleStatusUpdated = (updatedSession: Session) => {
+        setSessions(prev => prev.map(s => s.id === updatedSession.id ? { ...s, status: updatedSession.status } : s));
+        setQuickModalSession(prev => prev && prev.id === updatedSession.id ? { ...prev, status: updatedSession.status } : prev);
     };
 
     const handleSlotClick = (date: Date, time: string) => {
@@ -365,6 +388,20 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                 initialTime={modalInitialTime}
                 initialProfessionalId={modalInitialProf}
             />
+
+            {quickModalSession && (
+                <SessionQuickModal
+                    isOpen={!!quickModalSession}
+                    onClose={() => setQuickModalSession(null)}
+                    session={quickModalSession}
+                    patient={patients.find(p => p.id === quickModalSession.patientId)}
+                    professional={professionals.find(p => p.id === quickModalSession.professionalId)}
+                    unit={units.find(u => u.id === quickModalSession.unitId) || unit}
+                    agreements={agreements}
+                    onOpenFullEdit={handleOpenFullAppointmentModal}
+                    onStatusUpdated={handleStatusUpdated}
+                />
+            )}
         </div>
     );
 };
