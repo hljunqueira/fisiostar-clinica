@@ -45,11 +45,21 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
         loadData();
     }, []);
 
-    // Today's sessions
+    // Today's sessions (desconsidera canceladas, bloqueios de horário e deduplica por ID)
     const today = new Date().toISOString().split('T')[0];
-    const todaySessions = sessions.filter(s =>
-        s.unitId === currentUnit && s.date === today
-    ).sort((a, b) => a.time.localeCompare(b.time));
+    const sessionMap = new Map<string, Session>();
+    sessions.forEach(s => {
+        if (
+            (currentUnit === 'ALL' || s.unitId === currentUnit) &&
+            s.date === today &&
+            s.status !== 'Cancelada' &&
+            !s.type?.toLowerCase().includes('bloqueio')
+        ) {
+            sessionMap.set(s.id, s);
+        }
+    });
+
+    const todaySessions = Array.from(sessionMap.values()).sort((a, b) => a.time.localeCompare(b.time));
 
     const confirmedToday = todaySessions.filter(s => s.status === 'Confirmada').length;
     const pendingToday = todaySessions.filter(s => s.status === 'Agendada').length;
@@ -58,7 +68,7 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
     // Upcoming sessions (next 3 hours)
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-    const upcomingSessions = todaySessions.filter(s => s.time >= currentTime).slice(0, 5);
+    const upcomingSessions = todaySessions.filter(s => (s.time || '').substring(0, 5) >= currentTime).slice(0, 5);
 
     // Active patients
     const activePatients = patients.filter(p => p.status === 'Active');
@@ -191,7 +201,7 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center gap-3">
                                                     <div className="text-center min-w-[60px]">
-                                                        <p className="text-lg font-bold text-gray-900">{session.time}</p>
+                                                        <p className="text-lg font-bold text-gray-900">{(session.time || '').substring(0, 5)}</p>
                                                         <p className="text-xs text-gray-500">{session.type}</p>
                                                     </div>
                                                     <div className="border-l border-gray-200 pl-3">
@@ -252,7 +262,7 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
                                         <div key={session.id} className="flex items-start gap-3 text-sm p-2 rounded hover:bg-gray-50">
                                             <div className="w-2 h-2 mt-1.5 rounded-full bg-blue-500 flex-shrink-0" />
                                             <div>
-                                                <p className="font-medium text-gray-900">{session.time}</p>
+                                                <p className="font-medium text-gray-900">{(session.time || '').substring(0, 5)}</p>
                                                 <p className="text-gray-600">{patient?.name}</p>
                                                 <p className="text-gray-500 text-xs">{session.type}</p>
                                             </div>

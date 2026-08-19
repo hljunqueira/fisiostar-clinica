@@ -13,6 +13,7 @@ import WeekView from './Calendar/WeekView';
 import MonthView from './Calendar/MonthView';
 import DayListView from './Calendar/DayListView';
 import WeekListView from './Calendar/WeekListView';
+import { getSavedScheduleConfig } from './Settings/ScheduleSettingsTab';
 
 interface ScheduleProps {
     currentUnit: UnitId;
@@ -20,9 +21,10 @@ interface ScheduleProps {
 
 const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     const [searchParams] = useSearchParams();
+    const scheduleConfig = getSavedScheduleConfig();
 
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [viewMode, setViewMode] = useState<ViewMode>('week'); // Default to week view like ZenFisio
+    const [viewMode, setViewMode] = useState<ViewMode>(scheduleConfig.defaultView || 'week'); // Default to week view like ZenFisio
 
     // Filters
     const [filterProf, setFilterProf] = useState<string>(searchParams.get('professionalId') || 'all');
@@ -40,6 +42,9 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
 
     const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
     const [editingSession, setEditingSession] = useState<Session | null>(null);
+    const [modalInitialDate, setModalInitialDate] = useState<string | undefined>(undefined);
+    const [modalInitialTime, setModalInitialTime] = useState<string | undefined>(undefined);
+    const [modalInitialProf, setModalInitialProf] = useState<string | undefined>(undefined);
 
     // Auto-open modal if requested via URL
     useEffect(() => {
@@ -57,8 +62,6 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
 
     async function loadData() {
         try {
-            // Se currentUnit for 'ALL', buscamos todas as unidades para ter a lista completa
-            // Se for específico, também precisamos da lista para nomes, mas focamos na unidade
             const [sessionsData, patientsData, professionalsData, unitsData] = await Promise.all([
                 sessionsApi.getAll(),
                 patientsApi.getAll(),
@@ -97,80 +100,132 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
         return isProf && isSpecialty && isStatus && isPatientMatch;
     });
 
+    const handleEditSession = (session: Session) => {
+        setEditingSession(session);
+        setIsAppointmentModalOpen(true);
+    };
 
-    const handleSyncGoogle = () => {
-        setIsSyncing(true);
-        setTimeout(() => {
-            setIsSyncing(false);
-            toast.success('Agenda sincronizada com Google Calendar com sucesso!');
-        }, 1500);
+    const handleSlotClick = (date: Date, time: string) => {
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        const dateStr = `${year}-${month}-${day}`;
+
+        setEditingSession(null);
+        setModalInitialDate(dateStr);
+        setModalInitialTime(time);
+        setModalInitialProf(filterProf !== 'all' ? filterProf : undefined);
+        setIsAppointmentModalOpen(true);
+    };
+
+    const handleCloseModal = () => {
+        setIsAppointmentModalOpen(false);
+        setEditingSession(null);
+        setModalInitialDate(undefined);
+        setModalInitialTime(undefined);
+        setModalInitialProf(undefined);
     };
 
     const handleSaveSession = async (sessionData: Session) => {
         try {
             if (editingSession) {
-                // Update existing session
                 await sessionsApi.update(sessionData.id, sessionData);
                 toast.success('Agendamento atualizado com sucesso!');
             } else {
-                // Create new session
                 await sessionsApi.create(sessionData);
-                toast.success('Sessão agendada com sucesso!');
+
+                // Se solicitou repetição semanal
+                if (sessionData.repeatWeekly) {
+                    const repeatCount = scheduleConfig.defaultRepeatCount || 10;
+                    const baseDate = new Date(`${sessionData.date}T12:00:00`);
+                    const promises = [];
+                    for (let i = 1; i < repeatCount; i++) {
+                        const nextDate = new Date(baseDate);
+                        nextDate.setDate(baseDate.getDate() + (i * 7));
+                        const y = nextDate.getFullYear();
+                        const m = (nextDate.getMonth() + 1).toString().padStart(2, '0');
+                        const d = nextDate.getDate().toString().padStart(2, '0');
+                        const nextDateStr = `${y}-${m}-${d}`;
+                        promises.push(
+                            sessionsApi.create({
+                                ...sessionData,
+                                date: nextDateStr,
+                                repeatWeekly: false
+                            })
+                        );
+                    }
+                    await Promise.allSettled(promises);
+                    toast.success(`Agendamento e ${repeatCount - 1} repetições criados com sucesso!`);
+                } else {
+                    toast.success('Agendamento criado com sucesso!');
+                }
             }
             await loadData();
-
-            // Navigate to the date of the appointment
-            const [year, month, day] = sessionData.date.split('-').map(Number);
-            const newDate = new Date(year, month - 1, day, 12, 0, 0);
-            setSelectedDate(newDate);
-            setEditingSession(null);
-
+            handleCloseModal();
         } catch (error) {
             console.error('Error saving session:', error);
             toast.error('Erro ao salvar agendamento');
         }
     };
 
-    const handleEditSession = (session: Session) => {
-        setEditingSession(session);
-        setIsAppointmentModalOpen(true);
-    };
-
     const handleDeleteSession = async (sessionId: string) => {
         try {
             await sessionsApi.delete(sessionId);
-            await loadData();
-            toast.success('Agendamento excluído com sucesso!');
+            toast.success('Agendamento excluído');
+            loadData();
         } catch (error) {
             console.error('Error deleting session:', error);
             toast.error('Erro ao excluir agendamento');
         }
     };
 
-    const handleCloseModal = () => {
-        setIsAppointmentModalOpen(false);
-        setEditingSession(null);
+    const handleUpdateSession = async (sessionId: string, updates: Partial<Session>) => {
+        try {
+            await sessionsApi.update(sessionId, updates);
+            toast.success('Agendamento atualizado');
+            loadData();
+        } catch (error) {
+            console.error('Error updating session:', error);
+            toast.error('Erro ao atualizar agendamento');
+        }
     };
 
-    const handleNavigateDate = (days: number) => {
+    const handleNavigateDate = (arg: any) => {
+        if (arg === 'today') {
+            setSelectedDate(new Date());
+            return;
+        }
+
         const newDate = new Date(selectedDate);
-        newDate.setDate(selectedDate.getDate() + days);
+
+        if (typeof arg === 'number') {
+            if (viewMode === 'month') {
+                newDate.setMonth(selectedDate.getMonth() + (arg > 0 ? 1 : -1));
+            } else {
+                newDate.setDate(selectedDate.getDate() + arg);
+            }
+        } else {
+            const step = arg === 'next' ? 1 : -1;
+            if (viewMode === 'day' || viewMode === 'dayList') {
+                newDate.setDate(selectedDate.getDate() + step);
+            } else if (viewMode === 'week' || viewMode === 'weekList') {
+                newDate.setDate(selectedDate.getDate() + (step * 7));
+            } else if (viewMode === 'month') {
+                newDate.setMonth(selectedDate.getMonth() + step);
+            }
+        }
         setSelectedDate(newDate);
     };
 
-    // Handler for drag-and-drop session updates
-    const handleUpdateSession = async (sessionId: string, updates: Partial<Session>) => {
+    const handleSyncGoogle = async () => {
         try {
-            const session = sessions.find(s => s.id === sessionId);
-            if (!session) return;
-
-            const updatedSession = { ...session, ...updates };
-            await sessionsApi.update(sessionId, updatedSession);
-            await loadData();
-            toast.success('Agendamento movido com sucesso!');
-        } catch (error) {
-            console.error('Error updating session:', error);
-            toast.error('Erro ao mover agendamento');
+            setIsSyncing(true);
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            toast.success('Agenda sincronizada com sucesso!');
+        } catch {
+            toast.error('Erro ao sincronizar agenda');
+        } finally {
+            setIsSyncing(false);
         }
     };
 
@@ -186,6 +241,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         unit={unit}
                         units={units}
                         onEditSession={handleEditSession}
+                        onSlotClick={handleSlotClick}
                         onUpdateSession={handleUpdateSession}
                     />
                 );
@@ -196,6 +252,8 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         sessions={filteredSessions}
                         professionals={professionals}
                         patients={patients}
+                        unit={unit}
+                        units={units}
                         onEditSession={handleEditSession}
                         onDateClick={(date) => {
                             setSelectedDate(date);
@@ -236,6 +294,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                         unit={unit}
                         units={units}
                         onEditSession={handleEditSession}
+                        onSlotClick={handleSlotClick}
                         onDateClick={(date) => {
                             setSelectedDate(date);
                             setViewMode('day');
@@ -264,11 +323,32 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                 setFilterPatient={setFilterPatient}
                 unit={unit}
                 professionals={professionals}
-                onNewAppointment={() => setIsAppointmentModalOpen(true)}
+                onNewAppointment={() => {
+                    setEditingSession(null);
+                    setModalInitialDate(undefined);
+                    setModalInitialTime(undefined);
+                    setModalInitialProf(filterProf !== 'all' ? filterProf : undefined);
+                    setIsAppointmentModalOpen(true);
+                }}
                 onSyncGoogle={handleSyncGoogle}
                 isSyncing={isSyncing}
                 onColorConfigChange={() => setRefreshColor(prev => prev + 1)}
             />
+
+            {/* Banner de Aniversariantes do Dia */}
+            {scheduleConfig.showBirthdays && (() => {
+                const todayMD = `${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getDate().toString().padStart(2, '0')}`;
+                const birthdayPatients = patients.filter(p => p.birthDate && p.birthDate.endsWith(todayMD));
+                if (birthdayPatients.length === 0) return null;
+                return (
+                    <div className="bg-amber-50/80 border border-amber-200 text-amber-900 px-4 py-2 rounded-xl text-xs flex items-center justify-between animate-fade-in shadow-xs">
+                        <span className="font-semibold flex items-center gap-1.5">
+                            🎂 <strong>Aniversariantes de hoje:</strong> {birthdayPatients.map(p => p.name).join(', ')}
+                        </span>
+                        <span className="text-[10px] text-amber-700 font-bold">Deseje um feliz aniversário!</span>
+                    </div>
+                );
+            })()}
 
             <div className="flex-1 min-h-0">
                 {renderCalendarView()}
@@ -281,10 +361,12 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                 onDelete={handleDeleteSession}
                 currentUnit={currentUnit}
                 editingSession={editingSession}
+                initialDate={modalInitialDate}
+                initialTime={modalInitialTime}
+                initialProfessionalId={modalInitialProf}
             />
         </div>
     );
 };
 
 export default Schedule;
-

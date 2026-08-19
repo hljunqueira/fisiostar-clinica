@@ -6,6 +6,8 @@ export const maskPhone = (value: string) => {
         .slice(0, 15);
 };
 
+export const formatPhone = maskPhone;
+
 export const maskCpf = (value: string) => {
     return value
         .replace(/\D/g, '')
@@ -39,22 +41,26 @@ export const maskCurrency = (value: string) => {
 };
 
 export const validateCpf = (strCPF: string) => {
-    var Soma;
-    var Resto;
-    Soma = 0;
-    if (strCPF == "00000000000") return false;
+    if (!strCPF) return false;
+    const cleanCpf = strCPF.replace(/\D/g, '');
+    if (cleanCpf.length !== 11) return false;
+    if (/^(\d)\1{10}$/.test(cleanCpf)) return false;
 
-    for (let i = 1; i <= 9; i++) Soma = Soma + parseInt(strCPF.substring(i - 1, i)) * (11 - i);
-    Resto = (Soma * 10) % 11;
+    let soma = 0;
+    for (let i = 0; i < 9; i++) {
+        soma += parseInt(cleanCpf.charAt(i), 10) * (10 - i);
+    }
+    let resto = (soma * 10) % 11;
+    if (resto === 10 || resto === 11) resto = 0;
+    if (resto !== parseInt(cleanCpf.charAt(9), 10)) return false;
 
-    if ((Resto == 10) || (Resto == 11)) Resto = 0;
-    if (Resto != parseInt(strCPF.substring(9, 10))) return false;
+    soma = 0;
+    for (let i = 0; i < 10; i++) {
+        soma += parseInt(cleanCpf.charAt(i), 10) * (11 - i);
+    }
+    resto = (soma * 10) % 11;
+    if (resto === 10 || resto === 11) resto = 0;
+    if (resto !== parseInt(cleanCpf.charAt(10), 10)) return false;
 
-    Soma = 0;
-    for (let i = 1; i <= 10; i++) Soma = Soma + parseInt(strCPF.substring(i - 1, i)) * (12 - i);
-    Resto = (Soma * 10) % 11;
-
-    if ((Resto == 10) || (Resto == 11)) Resto = 0;
-    if (Resto != parseInt(strCPF.substring(10, 11))) return false;
     return true;
 };

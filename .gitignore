@@ -28,6 +28,7 @@ dist-ssr
 .env*
 *.tar.gz
 *.zip
+*.xlsx
 
 # Deploy Scripts & Local Agent Memory
 deploy-fisiostar.ps1

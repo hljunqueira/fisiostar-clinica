@@ -1,8 +1,9 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import { Session, SessionStatus, Professional, Patient, Unit, WeekDay } from '../../types';
-import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical, Lock } from 'lucide-react';
 import { getSavedColorConfig, getColorStyles } from './CalendarColorModal';
+import { calculateOverlappingLayout } from '../../src/utils/calendar-layout';
 
 interface WeekViewProps {
     currentDate: Date;
@@ -13,6 +14,7 @@ interface WeekViewProps {
     units: Unit[]; // Added units list
     onEditSession: (session: Session) => void;
     onDateClick: (date: Date) => void;
+    onSlotClick?: (date: Date, time: string) => void;
     onUpdateSession?: (sessionId: string, updates: Partial<Session>) => void;
 }
 
@@ -76,7 +78,7 @@ const getDynamicColor = (session: Session, professionals: Professional[]) => {
     return statusColor || getColorByProfessional(session.professionalId, professionals);
 };
 
-const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professionals, patients, unit, units, onEditSession, onDateClick, onUpdateSession }) => {
+const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professionals, patients, unit, units, onEditSession, onDateClick, onSlotClick, onUpdateSession }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [draggingSession, setDraggingSession] = useState<Session | null>(null);
     const [dragOffset, setDragOffset] = useState({ y: 0 });
@@ -255,14 +257,30 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                         return (
                             <div
                                 key={dayIdx}
-                                onClick={() => onDateClick(dayDate)}
                                 onDragOver={handleDragOver}
                                 onDrop={(e) => handleDrop(e, dayDate)}
-                                className={`relative border-r border-gray-200 last:border-r-0 cursor-pointer ${isToday ? 'bg-blue-50/30' : isClosed ? 'bg-gray-100/50' : 'bg-white'}`}
+                                className={`relative border-r border-gray-200 last:border-r-0 ${isToday ? 'bg-blue-50/30' : isClosed ? 'bg-gray-100/50' : 'bg-white'}`}
                             >
                                 {/* Hour grid lines */}
                                 {hours.map(hour => (
-                                    <div key={hour} className="h-[60px] border-b border-gray-100 hover:bg-gray-50/50"></div>
+                                    <div
+                                        key={hour}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if (isClosed) return;
+                                            const timeStr = `${hour.toString().padStart(2, '0')}:00`;
+                                            if (onSlotClick) {
+                                                onSlotClick(dayDate, timeStr);
+                                            } else {
+                                                onDateClick(dayDate);
+                                            }
+                                        }}
+                                        className="h-[60px] border-b border-gray-100 hover:bg-primary/5 transition-colors cursor-pointer group relative"
+                                    >
+                                        <span className="opacity-0 group-hover:opacity-100 absolute inset-0 flex items-center justify-center text-[10px] text-primary font-bold transition-opacity pointer-events-none">
+                                            Agendar {hour.toString().padStart(2, '0')}:00
+                                        </span>
+                                    </div>
                                 ))}
 
                                 {/* Closed overlay */}
@@ -272,46 +290,95 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                     </div>
                                 )}
 
-                                {/* Sessions */}
-                                {!isClosed && daySessions.map(session => {
-                                    const patient = patients.find(p => p.id === session.patientId);
-                                    const professional = professionals.find(p => p.id === session.professionalId);
-                                    const profName = professional?.name.split(' ')[0] || 'Prof';
+                                {/* Sessions with Smart Dynamic Overlapping Layout */}
+                                {!isClosed && (() => {
+                                    const dayLayouts = calculateOverlappingLayout(daySessions, startHour, 60, true);
 
-                                    const [sessionHour, sessionMin] = session.time.split(':').map(Number);
-                                    const topOffset = (sessionHour - startHour) * 60 + (sessionMin / 60) * 60;
+                                    return daySessions.map(session => {
+                                        const patient = patients.find(p => p.id === session.patientId);
+                                        const professional = professionals.find(p => p.id === session.professionalId);
+                                        const layout = dayLayouts.get(session.id);
 
-                                    // Use dynamic user-configured color (supports preset and custom HEX)
-                                    const colorObj = getDynamicColor(session, professionals);
-                                    const colorStyles = getColorStyles(colorObj);
-                                    const isDragging = draggingSession?.id === session.id;
+                                        const [sessionHour, sessionMin] = session.time.split(':').map(Number);
+                                        const topOffset = layout ? layout.top : ((sessionHour - startHour) * 60 + (sessionMin / 60) * 60);
+                                        const cardHeight = layout ? `${layout.height}px` : '55px';
+                                        const leftStyle = layout ? `calc(${layout.leftPercent}% + 1px)` : '2px';
+                                        const widthStyle = layout ? `calc(${layout.widthPercent}% - 2px)` : 'calc(100% - 4px)';
+                                        const zIndex = layout ? layout.zIndex : 10;
+                                        const isMultiCol = layout && layout.totalColumns > 1;
 
-                                    return (
-                                        <div
-                                            key={session.id}
-                                            draggable={!!onUpdateSession}
-                                            onDragStart={(e) => handleDragStart(e, session)}
-                                            onDragEnd={handleDragEnd}
-                                            onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
-                                            className={`absolute left-0.5 right-0.5 p-1 rounded-sm border-l-[3px] text-[10px] leading-tight cursor-pointer hover:z-20 hover:shadow-lg hover:scale-[1.02] transition-all overflow-hidden ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                                            style={{ top: `${topOffset}px`, height: '55px', ...colorStyles.style }}
-                                            title={`${session.time} - ${patient?.name} (${profName}) - Arraste para mover`}
-                                        >
-                                            <div className="flex items-start justify-between">
-                                                <div className="flex flex-col flex-1 min-h-0">
-                                                    <div className="font-bold truncate text-[10px] leading-3">
-                                                        <span className="block text-[8px] text-gray-500 uppercase tracking-tighter mb-0.5">
-                                                            {units.find(u => u.id === session.unitId)?.name || 'Unidade'}
-                                                        </span>
-                                                        [{profName}] {patient?.name}
+                                        // Use dynamic user-configured color (supports preset and custom HEX)
+                                        const colorObj = getDynamicColor(session, professionals);
+                                        const colorStyles = getColorStyles(colorObj);
+                                        const isDragging = draggingSession?.id === session.id;
+
+                                        const isBlocked = session.type?.includes('Bloqueio');
+
+                                        if (isBlocked) {
+                                            return (
+                                                <div
+                                                    key={session.id}
+                                                    onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
+                                                    className="absolute p-1.5 rounded-lg border-l-[4px] border-l-amber-500 bg-slate-100/95 text-slate-800 text-[10px] leading-tight cursor-pointer hover:z-50 hover:shadow-2xl hover:scale-[1.03] transition-all overflow-hidden border border-slate-300/80 shadow-xs ring-1 ring-black/5"
+                                                    style={{
+                                                        top: `${topOffset}px`,
+                                                        height: cardHeight,
+                                                        left: leftStyle,
+                                                        width: widthStyle,
+                                                        zIndex
+                                                    }}
+                                                    title={`🔒 Horário Bloqueado: ${session.time} - ${professional?.name || ''} (${session.notes || 'Indisponível'}) - Clique para editar ou liberar`}
+                                                >
+                                                    <div className="flex items-center justify-between gap-1 font-bold text-slate-900 truncate">
+                                                        <div className="flex items-center gap-1 min-w-0">
+                                                            <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                                                            <span className="truncate">{isMultiCol ? 'Bloqueio' : 'Bloqueio de Horário'}</span>
+                                                        </div>
+                                                        <span className="text-[9px] font-mono text-slate-500 font-semibold shrink-0">{session.time.substring(0, 5)}</span>
                                                     </div>
-                                                    <div className="opacity-80 truncate text-[9px] mt-0.5">{session.type}</div>
+                                                    <div className="text-[9px] text-slate-600 truncate mt-0.5 font-medium">
+                                                        {professional?.name ? `${professional.name} ` : ''}{!isMultiCol && session.notes ? `• ${session.notes}` : ''}
+                                                    </div>
                                                 </div>
-                                                {onUpdateSession && <GripVertical className="w-3 h-3 opacity-50 shrink-0" />}
+                                            );
+                                        }
+
+                                        return (
+                                            <div
+                                                key={session.id}
+                                                draggable={!!onUpdateSession}
+                                                onDragStart={(e) => handleDragStart(e, session)}
+                                                onDragEnd={handleDragEnd}
+                                                onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
+                                                className={`absolute p-1.5 rounded-lg border-l-[4px] text-[10px] leading-tight cursor-pointer hover:z-50 hover:shadow-2xl hover:scale-[1.03] transition-all overflow-hidden border border-black/10 shadow-xs ring-1 ring-black/5 ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                                style={{
+                                                    top: `${topOffset}px`,
+                                                    height: cardHeight,
+                                                    left: leftStyle,
+                                                    width: widthStyle,
+                                                    zIndex,
+                                                    ...colorStyles.style
+                                                }}
+                                                title={`${session.time} - Paciente: ${patient?.name || 'Sem nome'} | Profissional: ${professional?.name || 'Não informado'} - Arraste para mover`}
+                                            >
+                                                <div className="flex items-start justify-between h-full">
+                                                    <div className="flex flex-col flex-1 min-h-0">
+                                                        <div className="flex items-center justify-between gap-1">
+                                                            <div className="font-black truncate text-[11px] leading-3 text-gray-900">
+                                                                {patient?.name || 'Paciente'}
+                                                            </div>
+                                                            <span className="text-[9px] font-mono text-gray-600 font-bold shrink-0">{session.time.substring(0, 5)}</span>
+                                                        </div>
+                                                        <div className="opacity-85 truncate text-[9px] mt-0.5 font-semibold text-gray-700">
+                                                            {session.type || 'Sessão'} {professional?.name ? `• ${professional.name}` : ''}
+                                                        </div>
+                                                    </div>
+                                                    {onUpdateSession && !isMultiCol && <GripVertical className="w-3 h-3 opacity-40 shrink-0 ml-0.5" />}
+                                                </div>
                                             </div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    });
+                                })()}
                             </div>
                         );
                     })}

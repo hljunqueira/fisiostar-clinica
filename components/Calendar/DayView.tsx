@@ -1,8 +1,9 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Session, SessionStatus, Professional, Patient, Unit, WeekDay } from '../../types';
-import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, XCircle, User, GripVertical, Lock } from 'lucide-react';
 import { getSavedColorConfig, getColorStyles } from './CalendarColorModal';
+import { calculateOverlappingLayout } from '../../src/utils/calendar-layout';
 
 interface DayViewProps {
     date: Date;
@@ -12,6 +13,7 @@ interface DayViewProps {
     unit: Unit | null;
     units: Unit[]; // Added units list
     onEditSession: (session: Session) => void;
+    onSlotClick?: (date: Date, time: string) => void;
     onUpdateSession?: (sessionId: string, updates: Partial<Session>) => void;
 }
 
@@ -77,7 +79,7 @@ const getDynamicColor = (session: Session, professionals: Professional[]) => {
     return statusColor || getColorByProfessional(session.professionalId, professionals);
 };
 
-const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patients, unit, units, onEditSession, onUpdateSession }) => {
+const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patients, unit, units, onEditSession, onSlotClick, onUpdateSession }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const gridRef = useRef<HTMLDivElement>(null);
     const [draggingSession, setDraggingSession] = useState<Session | null>(null);
@@ -212,7 +214,21 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                         >
                             {/* Hour grid lines */}
                             {hours.map(hour => (
-                                <div key={hour} className="h-[60px] border-b border-gray-100 hover:bg-gray-50/50"></div>
+                                <div
+                                    key={hour}
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        const timeStr = `${hour.toString().padStart(2, '0')}:00`;
+                                        if (onSlotClick) {
+                                            onSlotClick(date, timeStr);
+                                        }
+                                    }}
+                                    className="h-[60px] border-b border-gray-100 hover:bg-primary/5 transition-colors cursor-pointer group relative"
+                                >
+                                    <span className="opacity-0 group-hover:opacity-100 absolute inset-0 flex items-center justify-center text-[10px] text-primary font-bold transition-opacity pointer-events-none">
+                                        Agendar {hour.toString().padStart(2, '0')}:00
+                                    </span>
+                                </div>
                             ))}
 
                             {/* Current Time Line */}
@@ -227,52 +243,100 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                 </div>
                             )}
 
-                            {/* Session Cards */}
-                            {daySessions.map(session => {
-                                const patient = patients.find(p => p.id === session.patientId);
-                                const prof = professionals.find(p => p.id === session.professionalId);
-                                const profName = prof?.name.split(' ')[0] || 'Prof';
+                            {/* Session Cards with Smart Dynamic Overlapping Layout */}
+                            {(() => {
+                                const dayLayouts = calculateOverlappingLayout(daySessions, startHour, 60, false);
 
-                                const [sessionHour, sessionMin] = session.time.split(':').map(Number);
-                                const topOffset = (sessionHour - startHour) * 60 + (sessionMin / 60) * 60;
+                                return daySessions.map(session => {
+                                    const patient = patients.find(p => p.id === session.patientId);
+                                    const prof = professionals.find(p => p.id === session.professionalId);
+                                    const layout = dayLayouts.get(session.id);
 
-                                // Use dynamic user-configured color (supports preset and custom HEX)
-                                const colorObj = getDynamicColor(session, professionals);
-                                const colorStyles = getColorStyles(colorObj);
-                                const isDragging = draggingSession?.id === session.id;
+                                    const [sessionHour, sessionMin] = session.time.split(':').map(Number);
+                                    const topOffset = layout ? layout.top : ((sessionHour - startHour) * 60 + (sessionMin / 60) * 60);
+                                    const cardHeight = layout ? `${layout.height}px` : '55px';
+                                    const leftStyle = layout ? `calc(${layout.leftPercent}% + 2px)` : '4px';
+                                    const widthStyle = layout ? `calc(${layout.widthPercent}% - 4px)` : 'calc(100% - 8px)';
+                                    const zIndex = layout ? layout.zIndex : 10;
+                                    const isMultiCol = layout && layout.totalColumns > 1;
 
-                                return (
-                                    <div
-                                        key={session.id}
-                                        draggable={!!onUpdateSession}
-                                        onDragStart={(e) => handleDragStart(e, session)}
-                                        onDragEnd={handleDragEnd}
-                                        onClick={() => onEditSession(session)}
-                                        className={`absolute left-1 right-1 p-2 rounded-sm border-l-[3px] text-xs leading-tight cursor-pointer hover:z-20 hover:shadow-lg hover:scale-[1.02] transition-all overflow-hidden ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                                        style={{ top: `${topOffset}px`, height: '55px', ...colorStyles.style }}
-                                        title={`${session.time} - ${patient?.name} (${profName}) - Arraste para mover`}
-                                    >
-                                        <div className="flex justify-between items-start h-full">
-                                            <div className="flex flex-col justify-between h-full overflow-hidden">
-                                                <div>
-                                                    <span className="block text-[9px] font-bold text-gray-500 uppercase tracking-wider mb-0.5">
-                                                        {units.find(u => u.id === session.unitId)?.name || 'UNIDADE'}
-                                                    </span>
-                                                    <div className="font-bold truncate">[{profName}] {patient?.name}</div>
-                                                    <div className="opacity-80 truncate text-[10px]">{session.type}</div>
+                                    // Use dynamic user-configured color (supports preset and custom HEX)
+                                    const colorObj = getDynamicColor(session, professionals);
+                                    const colorStyles = getColorStyles(colorObj);
+                                    const isDragging = draggingSession?.id === session.id;
+
+                                    const isBlocked = session.type?.includes('Bloqueio');
+
+                                    if (isBlocked) {
+                                        return (
+                                            <div
+                                                key={session.id}
+                                                onClick={() => onEditSession(session)}
+                                                className="absolute p-2 px-3 rounded-lg border-l-[4px] border-l-amber-500 bg-slate-100 text-slate-800 text-xs cursor-pointer hover:z-50 hover:shadow-xl hover:scale-[1.01] transition-all overflow-hidden border border-slate-300 shadow-xs"
+                                                style={{
+                                                    top: `${topOffset + 1}px`,
+                                                    height: `${layout ? Math.max(36, layout.height) : 56}px`,
+                                                    left: leftStyle,
+                                                    width: widthStyle,
+                                                    zIndex
+                                                }}
+                                                title={`🔒 Horário Bloqueado: ${session.time} - ${prof?.name || ''} (${session.notes || 'Indisponível'}) - Clique para editar ou liberar`}
+                                            >
+                                                <div className="flex flex-col justify-center h-full">
+                                                    <div className="flex items-center justify-between gap-1">
+                                                        <div className="flex items-center gap-1.5 min-w-0">
+                                                            <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                                            <span className="font-bold text-xs text-slate-900 truncate">
+                                                                {isMultiCol ? 'Bloqueio' : 'Bloqueio de Horário'}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-[10px] font-mono text-slate-500 font-bold shrink-0">
+                                                            {session.time.substring(0, 5)}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-[10px] text-slate-600 truncate mt-0.5 font-medium">
+                                                        {prof?.name ? `${prof.name} ` : ''}{!isMultiCol && session.notes ? `• ${session.notes}` : ''}
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="text-right shrink-0 flex flex-col items-end">
-                                                <p className="font-bold text-[10px] opacity-80">{session.time.substring(0, 5)}</p>
-                                                <div className="mt-1 flex items-center gap-1 opacity-70">
-                                                    {onUpdateSession && <GripVertical className="w-3 h-3" />}
-                                                    {getStatusIcon(session.status)}
+                                        );
+                                    }
+
+                                    return (
+                                        <div
+                                            key={session.id}
+                                            draggable={!!onUpdateSession}
+                                            onDragStart={(e) => handleDragStart(e, session)}
+                                            onDragEnd={handleDragEnd}
+                                            onClick={() => onEditSession(session)}
+                                            className={`absolute p-2 px-3 rounded-lg border-l-[4px] text-xs cursor-pointer hover:z-50 hover:shadow-xl hover:scale-[1.01] transition-all overflow-hidden border border-black/10 shadow-xs ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                            style={{
+                                                top: `${topOffset + 1}px`,
+                                                height: `${layout ? Math.max(36, layout.height) : 56}px`,
+                                                left: leftStyle,
+                                                width: widthStyle,
+                                                zIndex,
+                                                ...colorStyles.style
+                                            }}
+                                            title={`${session.time} - Paciente: ${patient?.name || 'Sem nome'} | Profissional: ${prof?.name || 'Não informado'} - Arraste para mover`}
+                                        >
+                                            <div className="flex flex-col justify-center h-full">
+                                                <div className="flex items-center justify-between gap-1">
+                                                    <span className="font-bold text-xs text-gray-900 truncate">
+                                                        {patient?.name || 'Paciente'}
+                                                    </span>
+                                                    <span className="text-[10px] font-mono text-gray-500 font-bold shrink-0">
+                                                        {session.time.substring(0, 5)}
+                                                    </span>
+                                                </div>
+                                                <div className="text-[10px] opacity-85 truncate mt-0.5 font-medium text-gray-700">
+                                                    {session.type || 'Sessão'} {prof?.name ? `• ${prof.name}` : ''}
                                                 </div>
                                             </div>
                                         </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                });
+                            })()}
                         </div>
                     </div>
                 </div>

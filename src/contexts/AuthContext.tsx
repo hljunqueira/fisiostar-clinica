@@ -23,14 +23,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     useEffect(() => {
         // Check active session
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setUser(session?.user ?? null);
-            if (session?.user) {
-                loadSystemUser(session.user.email!);
-            } else {
+        supabase.auth.getSession()
+            .then(({ data: { session } }) => {
+                setUser(session?.user ?? null);
+                if (session?.user) {
+                    loadSystemUser(session.user.email!);
+                } else {
+                    setLoading(false);
+                }
+            })
+            .catch((err) => {
+                console.error('Error fetching auth session:', err);
+                setUser(null);
+                setSystemUser(null);
                 setLoading(false);
-            }
-        });
+            });
 
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {

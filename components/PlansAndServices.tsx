@@ -414,6 +414,75 @@ const PlansAndServices: React.FC = () => {
                                     </div>
                                 </div>
 
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-4 bg-gray-50/80 rounded-2xl border border-gray-100">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Renovação Automática</label>
+                                        <select
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium text-gray-900 bg-white"
+                                            value={editingPlan.autoRenew || 'none'}
+                                            onChange={e => setEditingPlan({ ...editingPlan, autoRenew: e.target.value as any })}
+                                        >
+                                            <option value="none">Sem Renovação Automática</option>
+                                            <option value="monthly">Mensal</option>
+                                            <option value="quarterly">Trimestral</option>
+                                            <option value="semiannual">Semestral</option>
+                                            <option value="annual">Anual</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Aviso Prévio (Dias)</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            placeholder="Ex: 5"
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium text-gray-900 bg-white"
+                                            value={editingPlan.alertDaysBefore || ''}
+                                            onChange={e => setEditingPlan({ ...editingPlan, alertDaysBefore: parseInt(e.target.value) || 0 })}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Lançamento Financeiro</label>
+                                        <select
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium text-gray-900 bg-white"
+                                            value={editingPlan.financialLaunchType || 'total'}
+                                            onChange={e => setEditingPlan({ ...editingPlan, financialLaunchType: e.target.value as any })}
+                                        >
+                                            <option value="total">Valor Total do Pacote</option>
+                                            <option value="per_session">Por Sessão Realizada</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+                                    <div>
+                                        <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider mb-1.5">Tipo de Comissão</label>
+                                        <select
+                                            className="w-full px-3 py-2 border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-medium text-gray-900 bg-white"
+                                            value={editingPlan.commissionType || 'none'}
+                                            onChange={e => setEditingPlan({ ...editingPlan, commissionType: e.target.value as any })}
+                                        >
+                                            <option value="none">Sem Comissão Extra</option>
+                                            <option value="percentage">Percentual sobre a sessão (%)</option>
+                                            <option value="fixed">Valor Fixo por sessão (R$)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-emerald-900 uppercase tracking-wider mb-1.5">
+                                            {editingPlan.commissionType === 'percentage' ? 'Percentual (%)' : 'Valor da Comissão (R$)'}
+                                        </label>
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            disabled={!editingPlan.commissionType || editingPlan.commissionType === 'none'}
+                                            placeholder="Ex: 30"
+                                            className="w-full px-3 py-2 border border-emerald-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-xs font-medium text-gray-900 bg-white disabled:bg-gray-100 disabled:text-gray-400"
+                                            value={editingPlan.commissionValue || ''}
+                                            onChange={e => setEditingPlan({ ...editingPlan, commissionValue: parseFloat(e.target.value) || 0 })}
+                                        />
+                                    </div>
+                                </div>
+
                                 <div>
                                     <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Descrição</label>
                                     <textarea

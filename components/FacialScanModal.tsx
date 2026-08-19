@@ -6,7 +6,7 @@ interface FacialScanModalProps {
     isOpen: boolean;
     onClose: () => void;
     patientName: string;
-    onSaveFacialData: (facialDescriptor: string) => Promise<void>;
+    onSaveFacialData: (facialDescriptor: string, capturedPhotoUrl?: string) => Promise<void>;
 }
 
 export const FacialScanModal: React.FC<FacialScanModalProps> = ({
@@ -100,8 +100,8 @@ export const FacialScanModal: React.FC<FacialScanModalProps> = ({
                 hash: btoa(capturedImage.substring(0, 100))
             });
 
-            await onSaveFacialData(simulatedDescriptor);
-            toast.success(`Face cadastrada para ${patientName}!`);
+            await onSaveFacialData(simulatedDescriptor, capturedImage);
+            toast.success(`Face e foto do perfil cadastradas para ${patientName}!`);
             onClose();
         } catch (error) {
             console.error('Error saving facial data:', error);

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
-import { HashRouter as Router, Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
+import { HashRouter as Router, Routes, Route, NavLink, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Calendar,
@@ -20,9 +20,19 @@ import {
   Key,
   PanelLeftClose,
   PanelLeftOpen,
-  CreditCard
+  CreditCard,
+  Search,
+  Plus,
+  Activity,
+  DoorClosed,
+  MessageSquare
 } from 'lucide-react';
 import { UserProfileModal } from './components/UserProfileModal';
+import { EvaluationModal } from './components/EvaluationModal';
+import { EvolutionModal } from './components/EvolutionModal';
+import AppointmentModal from './components/AppointmentModal';
+import { NotificationBell } from './components/Notifications/NotificationBell';
+
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
 const SecretaryDashboard = React.lazy(() => import('./components/SecretaryDashboard'));
@@ -37,13 +47,16 @@ const ProfessionalPortal = React.lazy(() => import('./components/ProfessionalPor
 const Financial = React.lazy(() => import('./components/Financial'));
 const PlansAndServices = React.lazy(() => import('./components/PlansAndServices'));
 const AnnouncementsView = React.lazy(() => import('./components/AnnouncementsView'));
+const RoomBookingView = React.lazy(() => import('./components/Rooms/RoomBookingView').then(m => ({ default: m.RoomBookingView })));
+const InternalChat = React.lazy(() => import('./components/Chat/InternalChat').then(m => ({ default: m.InternalChat })));
+const TotemCheckIn = React.lazy(() => import('./components/Totem/TotemCheckIn').then(m => ({ default: m.TotemCheckIn })));
 const Login = React.lazy(() => import('./components/Login'));
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
 import { Toaster, toast } from 'react-hot-toast';
 import { NotificationsPopover } from './components/NotificationsPopover';
 
 import { UnitId, UserRole, RolePermissions, PermissionKey, Announcement, Unit, Notification, Professional, DEFAULT_ROLE_PERMISSIONS, getUserEffectivePermissions } from './src/types';
-import { unitsApi, announcementsApi, notificationsApi, professionalsApi } from './src/services/api';
+import { unitsApi, announcementsApi, notificationsApi, professionalsApi, sessionsApi } from './src/services/api';
 
 const DEFAULT_PERMISSIONS = DEFAULT_ROLE_PERMISSIONS;
 
@@ -74,14 +87,14 @@ const Sidebar = ({
     { icon: <LayoutDashboard className="w-5 h-5" />, label: 'Visão Geral', path: '/meu-portal', permission: 'access_professional_portal' },
     { icon: <Calendar className="w-5 h-5" />, label: 'Minha Agenda', path: '/meu-portal/agenda', permission: 'access_professional_portal' },
     { icon: <DollarSign className="w-5 h-5" />, label: 'Financeiro', path: '/meu-portal/financeiro', permission: 'access_professional_portal' },
-    { icon: <Megaphone className="w-5 h-5" />, label: 'Comunicados', path: '/meu-portal/comunicados', permission: 'access_professional_portal' },
     // Admin/Secretary/Manager/Financial links
     { icon: <Calendar className="w-5 h-5" />, label: 'Agenda Geral', path: '/agenda', permission: 'view_schedule' },
+    { icon: <DoorClosed className="w-5 h-5" />, label: 'Reserva de Salas', path: '/reserva-salas', permission: 'view_rooms' },
     { icon: <Users className="w-5 h-5" />, label: 'Pacientes', path: '/pacientes', permission: 'manage_patients' },
-    { icon: <Megaphone className="w-5 h-5" />, label: 'Comunicados', path: '/comunicados', permission: 'view_schedule' },
     { icon: <Briefcase className="w-5 h-5" />, label: 'Equipe', path: '/profissionais', permission: 'manage_team' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Serviços e Planos', path: '/servicos-planos', permission: 'manage_plans' },
     { icon: <DollarSign className="w-5 h-5" />, label: 'Financeiro Geral', path: '/financeiro', permission: 'view_financials' },
+    { icon: <MessageSquare className="w-5 h-5" />, label: 'Chat Interno', path: '/chat', permission: 'access_internal_chat' },
   ];
 
   // Filter links based on the current user's role permissions
@@ -228,6 +241,7 @@ interface LayoutProps {
   userRole: UserRole;
   userName: string;
   userAvatarUrl?: string;
+  currentUserId?: string;
   onOpenProfileModal?: () => void;
   onLogout: () => void;
   permissions: RolePermissions;
@@ -246,6 +260,7 @@ const Layout: React.FC<LayoutProps> = ({
   userRole,
   userName,
   userAvatarUrl,
+  currentUserId,
   onOpenProfileModal,
   onLogout,
   permissions,
@@ -260,6 +275,11 @@ const Layout: React.FC<LayoutProps> = ({
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isUnitMenuOpen, setIsUnitMenuOpen] = useState(false);
+  const [isEvaluationModalOpen, setIsEvaluationModalOpen] = useState(false);
+  const [isEvolutionModalOpen, setIsEvolutionModalOpen] = useState(false);
+  const [isAppointmentModalOpen, setIsAppointmentModalOpen] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState('');
+  const navigate = useNavigate();
 
   const toggleSidebarCollapse = () => {
     setIsSidebarCollapsed(prev => {
@@ -273,6 +293,13 @@ const Layout: React.FC<LayoutProps> = ({
     ? { id: 'ALL', name: 'Todas as Unidades', city: 'Visão Geral', isActive: true, specialties: [], hasPool: false } as Unit
     : units.find(u => u.id === currentUnit) || units[0] || { id: '', name: 'Carregando...', city: '', specialties: [], hasPool: false, isActive: false };
   const { pathname } = useLocation();
+
+  const handleGlobalSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (globalSearch.trim()) {
+      navigate(`/patients?search=${encodeURIComponent(globalSearch.trim())}`);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex font-sans antialiased text-secondary">
@@ -291,8 +318,8 @@ const Layout: React.FC<LayoutProps> = ({
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
-        <header className="h-16 bg-surface border-b border-gray-200/80 px-6 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md bg-white/90">
-          <div className="flex items-center gap-4">
+        <header className="h-16 bg-surface border-b border-gray-200/80 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-40 backdrop-blur-md bg-white/90 gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={() => setSidebarOpen(true)}
               className="md:hidden p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
@@ -304,14 +331,14 @@ const Layout: React.FC<LayoutProps> = ({
             <div className="relative">
               <button
                 onClick={() => setIsUnitMenuOpen(!isUnitMenuOpen)}
-                className="flex items-center gap-3 px-3 py-1.5 rounded-lg border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors focus:outline-none cursor-pointer"
+                className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors focus:outline-none cursor-pointer"
               >
-                <div className="p-1.5 bg-white rounded border border-gray-200 text-gray-500">
-                  <Building2 className="w-4 h-4" />
+                <div className="p-1 bg-white rounded-lg border border-gray-200 text-gray-500">
+                  <Building2 className="w-3.5 h-3.5" />
                 </div>
                 <div className="text-left hidden sm:block">
-                  <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Unidade Atual</p>
-                  <p className="text-xs font-bold text-gray-700 flex items-center gap-1">
+                  <p className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Unidade Atual</p>
+                  <p className="text-xs font-bold text-gray-800 flex items-center gap-1">
                     {selectedUnit.name}
                     <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${isUnitMenuOpen ? 'rotate-180 text-primary' : ''}`} />
                   </p>
@@ -378,8 +405,26 @@ const Layout: React.FC<LayoutProps> = ({
             </div>
           </div>
 
+          {/* Central Actions & Quick Search */}
+          <div className="flex items-center gap-2 flex-1 justify-center max-w-2xl px-2">
+            {/* Global Search */}
+            <form onSubmit={handleGlobalSearch} className="hidden lg:flex items-center relative w-full max-w-md">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Pesquisar paciente por nome ou CPF..."
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-gray-100/80 hover:bg-gray-100 focus:bg-white border border-gray-200/80 rounded-xl text-xs text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all shadow-2xs"
+              />
+            </form>
+          </div>
+
+          {/* Central de Notificações com Persistência & Realtime */}
+          <NotificationBell userId={currentUserId} />
+
           {/* User Profile Dropdown */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
               className="flex items-center gap-3 hover:opacity-90 transition-opacity focus:outline-none cursor-pointer"
@@ -391,17 +436,17 @@ const Layout: React.FC<LayoutProps> = ({
                 </p>
                 <div className="flex items-center gap-1.5 justify-end text-xs text-gray-500 font-medium">
                   <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
-                  {userRole === 'admin' ? 'Administrador' : userRole === 'secretary' ? 'Recepção' : 'Pilates • CREFITO-3/67890-F'}
+                  {userRole === 'admin' ? 'Administrador' : userRole === 'secretary' ? 'Recepção' : userRole === 'professional' ? 'Profissional' : userRole === 'super_admin' ? 'Super Admin' : 'Colaborador'}
                 </div>
               </div>
               {userAvatarUrl ? (
                 <img
                   src={userAvatarUrl}
                   alt={userName}
-                  className="w-11 h-11 rounded-full object-cover shadow-lg ring-2 ring-white border border-gray-200"
+                  className="w-10 h-10 rounded-full object-cover shadow-md ring-2 ring-white border border-gray-200"
                 />
               ) : (
-                <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-primary to-primary-hover flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-primary/20 ring-2 ring-white">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-primary to-primary-hover flex items-center justify-center text-white font-bold text-sm shadow-md shadow-primary/20 ring-2 ring-white">
                   {userName.charAt(0)}
                 </div>
               )}
@@ -437,6 +482,39 @@ const Layout: React.FC<LayoutProps> = ({
             )}
           </div>
         </header>
+
+        {/* Global Modals */}
+        {isEvaluationModalOpen && (
+          <EvaluationModal
+            isOpen={isEvaluationModalOpen}
+            onClose={() => setIsEvaluationModalOpen(false)}
+            currentUnit={currentUnit}
+          />
+        )}
+
+        {isEvolutionModalOpen && (
+          <EvolutionModal
+            isOpen={isEvolutionModalOpen}
+            onClose={() => setIsEvolutionModalOpen(false)}
+            currentUnit={currentUnit}
+          />
+        )}
+
+        {isAppointmentModalOpen && (
+          <AppointmentModal
+            isOpen={isAppointmentModalOpen}
+            onClose={() => setIsAppointmentModalOpen(false)}
+            onSave={async (newSession) => {
+              try {
+                await sessionsApi.create(newSession);
+                toast.success('Agendamento criado com sucesso!');
+              } catch (err: any) {
+                toast.error(err.message || 'Erro ao agendar.');
+              }
+            }}
+            currentUnit={currentUnit}
+          />
+        )}
 
         {/* Main Content */}
         <main className="p-2 lg:p-3 w-full max-w-full flex-1 flex flex-col min-h-0">
@@ -620,6 +698,16 @@ const AppContent: React.FC = () => {
     return <LoadingFallback />;
   }
 
+  // Modo Totem / Tablet para Check-in Biométrico e Facial
+  const currentPath = window.location.hash || window.location.pathname;
+  if (currentPath.includes('totem') || currentPath.includes('checkin')) {
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <TotemCheckIn />
+      </Suspense>
+    );
+  }
+
   if (!user || !systemUser || !role) {
     return (
       <Suspense fallback={<LoadingFallback />}>
@@ -644,6 +732,7 @@ const AppContent: React.FC = () => {
       userRole={role}
       userName={systemUser.name}
       userAvatarUrl={systemUser.avatarUrl}
+      currentUserId={systemUser.id}
       onOpenProfileModal={() => setIsProfileModalOpen(true)}
       onLogout={handleLogout}
       permissions={rolePermissions}
@@ -676,6 +765,18 @@ const AppContent: React.FC = () => {
 
           <Route path="/agenda" element={
             <Schedule currentUnit={currentUnit} />
+          } />
+
+          <Route path="/reserva-salas" element={
+            hasPermission('view_rooms') || hasPermission('book_rooms')
+              ? <RoomBookingView currentUnit={currentUnit} userRole={role} currentProfessionalId={systemUser?.id} />
+              : <Navigate to={getDefaultRoute()} replace />
+          } />
+
+          <Route path="/chat" element={
+            hasPermission('access_internal_chat')
+              ? <InternalChat currentUnit={currentUnit} currentUser={systemUser} />
+              : <Navigate to={getDefaultRoute()} replace />
           } />
 
           <Route path="/pacientes" element={
@@ -763,6 +864,8 @@ const AppContent: React.FC = () => {
               currentProfessionalId={systemUser?.id}
             />
           } />
+          <Route path="/totem" element={<TotemCheckIn />} />
+          <Route path="/checkin" element={<TotemCheckIn />} />
           <Route path="*" element={<Navigate to={getDefaultRoute()} replace />} />
         </Routes>
       </Suspense>

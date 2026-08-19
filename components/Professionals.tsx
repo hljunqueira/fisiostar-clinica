@@ -47,7 +47,13 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
         unitIds: [] as string[],
         avatarUrl: '',
         email: '',
-        password: ''
+        password: '',
+        personType: 'PF' as 'PF' | 'PJ',
+        document: '',
+        pixKey: '',
+        bankName: '',
+        bankAgency: '',
+        bankAccount: ''
     });
 
     useEffect(() => {
@@ -93,7 +99,13 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                 unitIds: professional.unitIds,
                 avatarUrl: professional.avatarUrl || '',
                 email: professional.email || '',
-                password: ''
+                password: '',
+                personType: professional.personType || 'PF',
+                document: professional.document || '',
+                pixKey: professional.pixKey || '',
+                bankName: professional.bankName || '',
+                bankAgency: professional.bankAgency || '',
+                bankAccount: professional.bankAccount || ''
             });
         } else {
             setSelectedProfessional(null);
@@ -106,7 +118,13 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                 unitIds: [currentUnit === 'ALL' ? 'fisiostar-ararangua' : currentUnit],
                 avatarUrl: '',
                 email: '',
-                password: ''
+                password: '',
+                personType: 'PF',
+                document: '',
+                pixKey: '',
+                bankName: '',
+                bankAgency: '',
+                bankAccount: ''
             });
         }
         setIsModalOpen(true);
@@ -701,6 +719,76 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                                                 className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium transition-all"
                                                 value={formData.hourlyRate}
                                                 onChange={e => setFormData({ ...formData, hourlyRate: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Tipo de Pessoa</label>
+                                            <select
+                                                className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium bg-white transition-all cursor-pointer"
+                                                value={formData.personType}
+                                                onChange={e => setFormData({ ...formData, personType: e.target.value as 'PF' | 'PJ' })}
+                                            >
+                                                <option value="PF">Pessoa Física (CPF)</option>
+                                                <option value="PJ">Pessoa Jurídica (CNPJ)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                                {formData.personType === 'PJ' ? 'CNPJ' : 'CPF'}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                placeholder={formData.personType === 'PJ' ? '00.000.000/0001-00' : '000.000.000-00'}
+                                                className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium transition-all"
+                                                value={formData.document}
+                                                onChange={e => setFormData({ ...formData, document: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Chave PIX (Para Repasse)</label>
+                                        <input
+                                            type="text"
+                                            placeholder="CPF, CNPJ, Email, Telefone ou Aleatória"
+                                            className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium transition-all"
+                                            value={formData.pixKey}
+                                            onChange={e => setFormData({ ...formData, pixKey: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-3 gap-2">
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Banco</label>
+                                            <input
+                                                type="text"
+                                                placeholder="Nubank, BB..."
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium"
+                                                value={formData.bankName}
+                                                onChange={e => setFormData({ ...formData, bankName: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Agência</label>
+                                            <input
+                                                type="text"
+                                                placeholder="0001"
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium"
+                                                value={formData.bankAgency}
+                                                onChange={e => setFormData({ ...formData, bankAgency: e.target.value })}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Conta</label>
+                                            <input
+                                                type="text"
+                                                placeholder="12345-6"
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-medium"
+                                                value={formData.bankAccount}
+                                                onChange={e => setFormData({ ...formData, bankAccount: e.target.value })}
                                             />
                                         </div>
                                     </div>
