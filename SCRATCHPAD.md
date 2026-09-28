@@ -131,3 +131,9 @@
   - [x] **Verificação Completa**:
     - `npx tsc --noEmit`: 0 erros de TypeScript.
     - `npm run build`: Vite build bem-sucedido em produção.
+- **Correção de Sobreposição Visual e Z-Index no Modal de Edição (`AuditEditSessionModal`)**:
+  - [x] Diagnóstico da causa-raiz: classe `z-60` não é padrão do Tailwind e foi ignorada pelo navegador (`z-index: auto`), fazendo com que o cabeçalho (`thead`) e rodapé (`tfoot`) com `position: sticky` e `z-10` fossem desenhados sobre o modal de edição.
+  - [x] Isolamento do card da auditoria: adicionado `relative z-0` ao card de `SessionAuditModal` criando um contexto de empilhamento independente.
+  - [x] Elevação e blindagem dos sub-modais: `AuditEditSessionModal`, `showAddPackageModal` e `transferModal` configurados com `z-[100]` e `style={{ zIndex: 100 }}`.
+  - [x] Elevação do `QuickPatientModal`: configurado com `z-[110]` e `style={{ zIndex: 110 }}` para sobrepor com perfeição o modal de edição.
+  - [x] Configuração oficial do Tailwind em `index.html`: adicionada escala explícita de `zIndex` (`60`, `70`, `80`, `90`, `100`, `110`).

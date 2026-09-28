@@ -104,7 +104,7 @@ export const QuickPatientModal: React.FC<QuickPatientModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ zIndex: 110 }}>
             <div className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
 
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative z-10 overflow-hidden animate-fade-in border border-gray-100">

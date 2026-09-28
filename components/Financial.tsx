@@ -2386,7 +2386,7 @@ const AuditEditSessionModal: React.FC<AuditEditSessionModalProps> = ({
     };
 
     return (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-60 p-3 sm:p-4 animate-fade-in">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[100] p-3 sm:p-4 animate-fade-in" style={{ zIndex: 100 }}>
             <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-gray-100">
                 {/* Header */}
                 <div className="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-white flex items-center justify-between shrink-0">
@@ -3722,7 +3722,7 @@ const SessionAuditModal: React.FC<SessionAuditModalProps> = ({
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center z-50 p-2 sm:p-4 animate-fade-in">
-            <div className="bg-white rounded-3xl shadow-2xl max-w-7xl w-full max-h-[96vh] flex flex-col overflow-hidden border border-gray-100">
+            <div className="relative z-0 bg-white rounded-3xl shadow-2xl max-w-7xl w-full max-h-[96vh] flex flex-col overflow-hidden border border-gray-100">
                 {/* Cabeçalho */}
                 <div className="px-6 py-3.5 border-b border-gray-100 bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-white flex items-center justify-between shrink-0 flex-wrap gap-3">
                     <div className="flex items-center gap-3">
@@ -4779,7 +4779,7 @@ const SessionAuditModal: React.FC<SessionAuditModalProps> = ({
 
             {/* MODAL: ADICIONAR NOVO PACOTE PAGO NA CONFERÊNCIA */}
             {showAddPackageModal && (
-                <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-60 p-4 animate-fade-in">
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[100] p-4 animate-fade-in" style={{ zIndex: 100 }}>
                     <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-gray-100">
                         <div className="flex items-center justify-between pb-3 border-b border-gray-100">
                             <div className="flex items-center gap-2.5">
@@ -4969,7 +4969,7 @@ const SessionAuditModal: React.FC<SessionAuditModalProps> = ({
 
             {/* Modal de Confirmação: Transferência para Conferência Individual */}
             {transferModal && (
-                <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-60 p-4 animate-fade-in">
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-[100] p-4 animate-fade-in" style={{ zIndex: 100 }}>
                     <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-5 space-y-4 border border-gray-100">
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700 shrink-0">
