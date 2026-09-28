@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Search, Filter, Briefcase, Plus, MoreHorizontal, DollarSign, Calendar, Clock, Star, MapPin, ChevronRight, X, Save, Trash2, CheckCircle, AlertCircle, UserCog, FileText, UploadCloud } from 'lucide-react';
-import { UnitId, Professional, Session, SystemUser, Specialty } from '../types';
+import { UnitId, Professional, Session, SystemUser, Specialty, isClinicalProfessional } from '../types';
 import { professionalsApi, sessionsApi, unitsApi, systemUsersApi, specialtiesApi } from '../src/services/api';
 import { storageApi } from '../src/services/storage-api';
 import { paymentsApi } from '../src/services/financial-api';
@@ -53,7 +53,18 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
         pixKey: '',
         bankName: '',
         bankAgency: '',
-        bankAccount: ''
+        bankAccount: '',
+        contractType: 'pj' as 'pj' | 'clt' | 'partnership' | 'socio',
+        baseSalary: '',
+        clinicFeeType: 'none' as 'none' | 'percentage' | 'fixed',
+        clinicFeeValue: '',
+        services: [] as Array<{ serviceName: string; commissionType: 'percentage' | 'fixed'; commissionValue: number }>
+    });
+
+    const [newServiceInput, setNewServiceInput] = useState({
+        serviceName: '',
+        commissionType: 'percentage' as 'percentage' | 'fixed',
+        commissionValue: '50'
     });
 
     useEffect(() => {
@@ -85,7 +96,8 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
         }
     }
 
-    const unitProfessionals = currentUnit === 'ALL' ? professionalsList : professionalsList.filter(p => p.unitIds.includes(currentUnit));
+    const unitProfessionals = (currentUnit === 'ALL' ? professionalsList : professionalsList.filter(p => p.unitIds.includes(currentUnit)))
+        .filter(isClinicalProfessional);
 
     const handleOpenModal = (professional?: Professional) => {
         if (professional) {
@@ -105,7 +117,16 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                 pixKey: professional.pixKey || '',
                 bankName: professional.bankName || '',
                 bankAgency: professional.bankAgency || '',
-                bankAccount: professional.bankAccount || ''
+                bankAccount: professional.bankAccount || '',
+                contractType: professional.contractType || 'pj',
+                baseSalary: professional.baseSalary ? professional.baseSalary.toString() : '',
+                clinicFeeType: professional.clinicFeeType || 'none',
+                clinicFeeValue: professional.clinicFeeValue ? professional.clinicFeeValue.toString() : '',
+                services: professional.services ? professional.services.map(s => ({
+                    serviceName: s.serviceName,
+                    commissionType: s.commissionType,
+                    commissionValue: s.commissionValue
+                })) : []
             });
         } else {
             setSelectedProfessional(null);
@@ -124,10 +145,48 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                 pixKey: '',
                 bankName: '',
                 bankAgency: '',
-                bankAccount: ''
+                bankAccount: '',
+                contractType: 'pj',
+                baseSalary: '',
+                clinicFeeType: 'none',
+                clinicFeeValue: '',
+                services: []
             });
         }
+        setNewServiceInput({ serviceName: '', commissionType: 'percentage', commissionValue: '50' });
         setIsModalOpen(true);
+    };
+
+    const handleAddServiceToForm = () => {
+        if (!newServiceInput.serviceName.trim()) {
+            toast.error('Informe ou selecione o serviço');
+            return;
+        }
+        const val = parseFloat(newServiceInput.commissionValue) || 0;
+        const exists = formData.services.some(s => s.serviceName.toLowerCase() === newServiceInput.serviceName.trim().toLowerCase());
+        if (exists) {
+            toast.error('Este serviço já está vinculado');
+            return;
+        }
+        setFormData(prev => ({
+            ...prev,
+            services: [
+                ...prev.services,
+                {
+                    serviceName: newServiceInput.serviceName.trim(),
+                    commissionType: newServiceInput.commissionType,
+                    commissionValue: val
+                }
+            ]
+        }));
+        setNewServiceInput({ serviceName: '', commissionType: 'percentage', commissionValue: '50' });
+    };
+
+    const handleRemoveServiceFromForm = (serviceName: string) => {
+        setFormData(prev => ({
+            ...prev,
+            services: prev.services.filter(s => s.serviceName !== serviceName)
+        }));
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -135,7 +194,10 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
         try {
             const professionalData = {
                 ...formData,
-                hourlyRate: parseFloat(formData.hourlyRate) || 0
+                hourlyRate: parseFloat(formData.hourlyRate) || 0,
+                baseSalary: parseFloat(formData.baseSalary) || 0,
+                clinicFeeValue: parseFloat(formData.clinicFeeValue) || 0,
+                services: formData.services
             };
 
             if (selectedProfessional) {
@@ -197,8 +259,11 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
         }
 
         const now = new Date();
-        const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-        const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        const year = now.getFullYear();
+        const month = now.getMonth();
+        const lastDay = new Date(year, month + 1, 0).getDate();
+        const periodStart = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+        const periodEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
         try {
             let created = 0;
@@ -479,9 +544,28 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 text-gray-600">
-                                            <span className="bg-gray-100 px-2 py-1 rounded text-xs font-medium border border-gray-200">
-                                                {prof.specialty}
-                                            </span>
+                                            <div className="flex flex-col gap-1 items-start">
+                                                <span className="bg-gray-100 px-2 py-0.5 rounded text-xs font-medium border border-gray-200">
+                                                    {prof.specialty}
+                                                </span>
+                                                {prof.contractType === 'socio' ? (
+                                                    <span className="bg-purple-100 text-purple-700 px-2 py-0.5 rounded text-[10px] font-bold border border-purple-200">
+                                                        👑 Sócio
+                                                    </span>
+                                                ) : prof.contractType === 'clt' ? (
+                                                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-bold border border-blue-200">
+                                                        CLT (Fixo R$ {prof.baseSalary || 0})
+                                                    </span>
+                                                ) : prof.contractType === 'partnership' ? (
+                                                    <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold border border-amber-200">
+                                                        Sublocação
+                                                    </span>
+                                                ) : (
+                                                    <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold border border-emerald-200">
+                                                        Prestador PJ
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4 text-gray-600">
                                             {renderUnitBadge(prof.unitIds)}
@@ -800,7 +884,7 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                                         <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">Email (Login do Portal)</label>
                                         <input
                                             type="email"
-                                            placeholder="Ex: profissional@fisiostar.com"
+                                            placeholder="Ex: profissional@fisiostarclinica.com.br"
                                             className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium transition-all"
                                             value={formData.email}
                                             onChange={e => setFormData({ ...formData, email: e.target.value })}
@@ -857,6 +941,200 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                                         </div>
                                         <p className="text-[11px] text-gray-500 mt-1">Selecione as unidades onde este profissional estará disponível na agenda.</p>
                                     </div>
+                                </div>
+                            </div>
+
+                            {/* Seção: Regime de Contratação, Salário & Serviços Vinculados */}
+                            <div className="p-4 bg-gradient-to-r from-blue-50/60 to-indigo-50/40 rounded-2xl border border-blue-100/80 space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-blue-200/50">
+                                    <div>
+                                        <h3 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                                            <Briefcase className="w-4 h-4 text-blue-600" />
+                                            Regime Contratual, Salário & Comissões por Serviço
+                                        </h3>
+                                        <p className="text-xs text-gray-600 mt-0.5">
+                                            Defina se o profissional é PJ, CLT ou Parceria e configure as comissões por procedimento.
+                                        </p>
+                                    </div>
+                                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 self-start sm:self-auto">
+                                        Módulo Financeiro 2.0
+                                    </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    {/* Regime de Contratação */}
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                            Regime de Contratação *
+                                        </label>
+                                        <select
+                                            className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold bg-white transition-all cursor-pointer"
+                                            value={formData.contractType}
+                                            onChange={e => setFormData({ ...formData, contractType: e.target.value as any })}
+                                        >
+                                            <option value="pj">Prestador PJ (Comissão por Produção)</option>
+                                            <option value="clt">Funcionário CLT (Salário Base + Comissões)</option>
+                                            <option value="socio">👑 Sócio / Titular (Pró-labore + Comissões / Rateio)</option>
+                                            <option value="partnership">Parceria / Sublocação (Paga à Clínica)</option>
+                                        </select>
+                                    </div>
+
+                                    {/* Campo Específico CLT ou Sócio: Salário Base / Pró-labore */}
+                                    {(formData.contractType === 'clt' || formData.contractType === 'socio') && (
+                                        <div>
+                                            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                                {formData.contractType === 'socio' ? 'Pró-labore Mensal (R$)' : 'Salário Base Mensal (R$) *'}
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                placeholder={formData.contractType === 'socio' ? 'Ex: 4500.00' : 'Ex: 3500.00'}
+                                                className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-bold text-gray-900 bg-white"
+                                                value={formData.baseSalary}
+                                                onChange={e => setFormData({ ...formData, baseSalary: e.target.value })}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Campo Específico Parceria: Tipo de Taxa */}
+                                    {formData.contractType === 'partnership' && (
+                                        <>
+                                            <div>
+                                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                                    Tipo de Taxa Paga à Clínica
+                                                </label>
+                                                <select
+                                                    className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-semibold bg-white transition-all cursor-pointer"
+                                                    value={formData.clinicFeeType}
+                                                    onChange={e => setFormData({ ...formData, clinicFeeType: e.target.value as any })}
+                                                >
+                                                    <option value="none">Isento / Nenhuma</option>
+                                                    <option value="percentage">Porcentagem da Sessão (%)</option>
+                                                    <option value="fixed">Valor Fixo por Atendimento (R$)</option>
+                                                </select>
+                                            </div>
+
+                                            {formData.clinicFeeType !== 'none' && (
+                                                <div>
+                                                    <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+                                                        {formData.clinicFeeType === 'percentage' ? 'Percentual para Clínica (%)' : 'Valor por Sessão (R$)'}
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        placeholder={formData.clinicFeeType === 'percentage' ? 'Ex: 30' : 'Ex: 40.00'}
+                                                        className="w-full px-3 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-bold text-indigo-700 bg-white"
+                                                        value={formData.clinicFeeValue}
+                                                        onChange={e => setFormData({ ...formData, clinicFeeValue: e.target.value })}
+                                                    />
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+
+                                {/* Bloco: Serviços e Porcentagens Vinculadas */}
+                                <div className="pt-2">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-xs font-bold text-gray-800">
+                                            Serviços Vinculados & Porcentagem de Repasse
+                                        </p>
+                                        <span className="text-[11px] text-gray-500">
+                                            {formData.services.length} serviço(s) configurado(s)
+                                        </span>
+                                    </div>
+
+                                    {/* Linha para Adicionar Serviço */}
+                                    <div className="p-3 bg-white rounded-xl border border-gray-200/80 shadow-xs flex flex-col sm:flex-row items-end gap-2.5 mb-3">
+                                        <div className="flex-1 w-full">
+                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                                                Nome do Procedimento / Especialidade
+                                            </label>
+                                            <input
+                                                type="text"
+                                                list="specialties-datalist"
+                                                placeholder="Ex: Studio Pilates, RPG, Fisioterapia..."
+                                                className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium outline-none focus:ring-1 focus:ring-blue-500"
+                                                value={newServiceInput.serviceName}
+                                                onChange={e => setNewServiceInput({ ...newServiceInput, serviceName: e.target.value })}
+                                            />
+                                            <datalist id="specialties-datalist">
+                                                {specialties.map(s => (
+                                                    <option key={s.id} value={s.name} />
+                                                ))}
+                                                <option value="Pilates" />
+                                                <option value="Fisioterapia Geral" />
+                                                <option value="RPG" />
+                                                <option value="Hidroterapia" />
+                                                <option value="Osteopatia" />
+                                                <option value="Avaliação" />
+                                            </datalist>
+                                        </div>
+
+                                        <div className="w-full sm:w-36">
+                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                                                Tipo Repasse
+                                            </label>
+                                            <select
+                                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-medium outline-none bg-white cursor-pointer"
+                                                value={newServiceInput.commissionType}
+                                                onChange={e => setNewServiceInput({ ...newServiceInput, commissionType: e.target.value as any })}
+                                            >
+                                                <option value="percentage">% Porcentagem</option>
+                                                <option value="fixed">R$ Fixo por Sessão</option>
+                                            </select>
+                                        </div>
+
+                                        <div className="w-full sm:w-28">
+                                            <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">
+                                                {newServiceInput.commissionType === 'percentage' ? 'Porcentagem (%)' : 'Valor (R$)'}
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                placeholder={newServiceInput.commissionType === 'percentage' ? '50' : '60.00'}
+                                                className="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-bold text-blue-700 outline-none"
+                                                value={newServiceInput.commissionValue}
+                                                onChange={e => setNewServiceInput({ ...newServiceInput, commissionValue: e.target.value })}
+                                            />
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={handleAddServiceToForm}
+                                            className="w-full sm:w-auto px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0"
+                                        >
+                                            + Vincular
+                                        </button>
+                                    </div>
+
+                                    {/* Lista de Serviços Adicionados */}
+                                    {formData.services.length > 0 ? (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                                            {formData.services.map((srv, idx) => (
+                                                <div key={idx} className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-blue-200/60 shadow-xs">
+                                                    <div>
+                                                        <p className="text-xs font-bold text-gray-900">{srv.serviceName}</p>
+                                                        <p className="text-[11px] font-semibold text-blue-600">
+                                                            {srv.commissionType === 'percentage' ? `${srv.commissionValue}% de repasse` : `R$ ${srv.commissionValue.toFixed(2)} por sessão`}
+                                                        </p>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveServiceFromForm(srv.serviceName)}
+                                                        className="text-gray-400 hover:text-red-500 p-1 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                                        title="Remover Serviço"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-gray-500 italic bg-white/60 p-2.5 rounded-xl border border-gray-200/50 text-center">
+                                            Nenhum serviço específico vinculado. As sessões usarão o valor hora padrão (R$ {formData.hourlyRate || '0'}) como referência.
+                                        </p>
+                                    )}
                                 </div>
                             </div>
 
@@ -943,7 +1221,7 @@ const Professionals: React.FC<ProfessionalsProps> = ({ currentUnit }) => {
                                 <input
                                     type="email"
                                     required
-                                    placeholder="Ex: colaborador@fisiostar.com"
+                                    placeholder="Ex: colaborador@fisiostarclinica.com.br"
                                     className="w-full px-3.5 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none text-sm font-medium transition-all"
                                     value={secretaryFormData.email}
                                     onChange={e => setSecretaryFormData({ ...secretaryFormData, email: e.target.value })}

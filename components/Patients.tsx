@@ -11,7 +11,7 @@ import AppointmentModal from './AppointmentModal';
 import { CheckInPresenceModal } from './CheckIn/CheckInPresenceModal';
 
 
-import { UnitId, Patient, SessionStatus, PlanTemplate, Professional, Session, Unit } from '../types';
+import { UnitId, Patient, SessionStatus, PlanTemplate, Professional, Session, Unit, isClinicalProfessional } from '../types';
 import { patientsApi, planTemplatesApi, professionalsApi, sessionsApi, unitsApi } from '../src/services/api';
 import { maskPhone, maskCpf, maskCep, validateCpf } from '../src/utils/masks';
 import { storageApi } from '../src/services/storage-api';
@@ -19,6 +19,7 @@ import { revenuesApi } from '../src/services/financial-api';
 import toast from 'react-hot-toast';
 import SignatureModal from './SignatureModal';
 import { useAuth } from '../src/contexts/AuthContext';
+import { generateRepeatSessionDates } from '../src/utils/repetition';
 
 // ... (omitted)
 
@@ -50,7 +51,7 @@ const ScheduleSessionModal = ({ onClose, onSave, patient, professionals, units, 
         });
     };
 
-    const availableProfessionals = professionals.filter(p => p.unitIds.includes(unitId));
+    const availableProfessionals = professionals.filter(p => p.unitIds.includes(unitId) && isClinicalProfessional(p));
 
     return (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
@@ -758,7 +759,7 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
             ]);
             setPatientsList(patientsData);
             setPlanTemplates(plansData);
-            setProfessionals(professionalsData);
+            setProfessionals(professionalsData.filter(isClinicalProfessional));
             setUnitName(unitData.name);
             setAllUnits(allUnitsData);
         } catch (error) {
@@ -869,7 +870,31 @@ const Patients = ({ currentUnit }: { currentUnit: UnitId }) => {
     const handleSaveAppointment = async (session: Session) => {
         try {
             await sessionsApi.create(session);
-            toast.success('Agendamento realizado com sucesso!');
+            if (session.repeat && session.repeatCount && session.repeatCount > 1) {
+                const dates = generateRepeatSessionDates(
+                    session.date,
+                    session.repeatFrequency || 'weekly',
+                    session.repeatCount,
+                    session.repeatDays || []
+                );
+                const repeatDates = dates.slice(1);
+                if (repeatDates.length > 0) {
+                    const promises = repeatDates.map((dStr) =>
+                        sessionsApi.create({
+                            ...session,
+                            date: dStr,
+                            repeat: false,
+                            repeatWeekly: false
+                        })
+                    );
+                    await Promise.allSettled(promises);
+                    toast.success(`Agendamento e ${repeatDates.length} repetições criados com sucesso!`);
+                } else {
+                    toast.success('Agendamento realizado com sucesso!');
+                }
+            } else {
+                toast.success('Agendamento realizado com sucesso!');
+            }
             setIsAppointmentModalOpen(false);
         } catch (error: any) {
             console.error('Erro ao agendar:', error);

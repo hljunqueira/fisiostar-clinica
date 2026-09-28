@@ -42,3 +42,11 @@ deploy-fisiostar.sh
 # Mockup root source files
 /mockup-muscular.webp
 /mockup-muscular1-removebg-preview.png
+
+# Sensitive credentials, patient spreadsheets and temporary scripts
+CREDENCIAIS_ACESSO_FISIOSTAR.md
+*.csv
+inspect_planilhas*.cjs
+query-access.sql
+scratch/
+supabase/sync_all_patients.sql

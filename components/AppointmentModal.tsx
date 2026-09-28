@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { UnitId, Session, SessionStatus, Professional, Patient, Unit, Agreement, Room } from '../types';
+import { UnitId, Session, SessionStatus, Professional, Patient, Unit, Agreement, Room, isClinicalProfessional } from '../types';
 import { patientsApi, professionalsApi, unitsApi, agreementsApi, sessionsApi } from '../src/services/api';
 import { roomsApi } from '../src/services/rooms-api';
 import { QuickPatientModal } from './QuickPatientModal';
@@ -7,7 +7,8 @@ import { ProfessionalHoursModal } from './Calendar/ProfessionalHoursModal';
 import { maskPhone, formatPhone } from '../src/utils/masks';
 import { timeToMinutes } from '../src/utils/calendar-layout';
 import { useNavigate } from 'react-router-dom';
-import { X, Lock, Unlock, Info, Calendar as CalendarIcon, UserPlus, AlertCircle } from 'lucide-react';
+import { X, Lock, Unlock, UserPlus } from 'lucide-react';
+import { DAYS_OF_WEEK } from '../src/utils/repetition';
 import toast from 'react-hot-toast';
 
 interface AppointmentModalProps {
@@ -64,7 +65,27 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
   );
   const [startTime, setStartTime] = useState<string>(editingSession?.time || initialTime || '08:00');
   const [endTime, setEndTime] = useState<string>(editingSession?.endTime || '09:00');
-  const [repeatWeekly, setRepeatWeekly] = useState<boolean>(editingSession?.repeatWeekly || false);
+
+  // Repetição
+  const [isRepeat, setIsRepeat] = useState<boolean>(
+    editingSession?.repeatWeekly || editingSession?.repeat || false
+  );
+  const [repeatFrequency, setRepeatFrequency] = useState<'weekly' | 'daily' | 'biweekly' | 'monthly'>(
+    editingSession?.repeatFrequency || 'weekly'
+  );
+  const [repeatCount, setRepeatCount] = useState<number>(editingSession?.repeatCount || 10);
+  const [repeatDays, setRepeatDays] = useState<number[]>(() => {
+    if (editingSession?.repeatDays && editingSession.repeatDays.length > 0) {
+      return editingSession.repeatDays;
+    }
+    const dStr = editingSession?.date || initialDate || new Date().toISOString().split('T')[0];
+    const [y, m, d] = dStr.split('-').map(Number);
+    if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+      return [new Date(y, m - 1, d, 12, 0, 0).getDay()];
+    }
+    return [new Date().getDay()];
+  });
+
   const [isEncaixe, setIsEncaixe] = useState<boolean>(editingSession?.isEncaixe || false);
 
   const [selectedProfessionalId, setSelectedProfessionalId] = useState<string>(
@@ -155,7 +176,7 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
         setUnit(activeUnitObj);
 
         const availablePros = professionalsData.filter(
-          (p) => !activeUnitId || p.unitIds.includes(activeUnitId) || currentUnit === 'ALL'
+          (p) => (!activeUnitId || p.unitIds.includes(activeUnitId) || currentUnit === 'ALL') && isClinicalProfessional(p)
         );
         setProfessionals(availablePros);
 
@@ -182,13 +203,33 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
     loadData();
   }, [isOpen, currentUnit, editingSession, initialDate, initialTime, initialProfessionalId]);
 
+  // Helper to add 1 hour
+  const calculateEndTimeOneHour = (timeStr: string): string => {
+    if (!timeStr) return '09:00';
+    const [h, m] = timeStr.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return '09:00';
+    const endH = (h + 1) % 24;
+    return `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+  };
+
   // Sincronizar dados ao abrir/editar
   useEffect(() => {
     if (editingSession) {
       setDate(editingSession.date);
       setStartTime(editingSession.time);
-      setEndTime(editingSession.endTime || '');
-      setRepeatWeekly(editingSession.repeatWeekly || false);
+      setEndTime(editingSession.endTime || calculateEndTimeOneHour(editingSession.time));
+      const hasRepeat = !!(editingSession.repeat || editingSession.repeatWeekly);
+      setIsRepeat(hasRepeat);
+      setRepeatFrequency(editingSession.repeatFrequency || 'weekly');
+      setRepeatCount(editingSession.repeatCount || 10);
+      if (editingSession.repeatDays && editingSession.repeatDays.length > 0) {
+        setRepeatDays(editingSession.repeatDays);
+      } else if (editingSession.date) {
+        const [y, m, d] = editingSession.date.split('-').map(Number);
+        if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          setRepeatDays([new Date(y, m - 1, d, 12, 0, 0).getDay()]);
+        }
+      }
       setIsEncaixe(editingSession.isEncaixe || false);
       setSelectedProfessionalId(editingSession.professionalId);
       setSelectedPatientId(editingSession.patientId);
@@ -204,17 +245,18 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
       setNotes(editingSession.notes || '');
       setIsBlockingMode(editingSession.type?.includes('Bloqueio') || false);
     } else {
+      const curDate = initialDate || new Date().toISOString().split('T')[0];
+      const curStart = initialTime || '08:00';
       if (initialDate) setDate(initialDate);
-      if (initialTime) {
-        setStartTime(initialTime);
-        const [h, m] = initialTime.split(':').map(Number);
-        if (!isNaN(h) && !isNaN(m)) {
-          const endH = (h + 1) % 24;
-          setEndTime(`${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`);
-        }
-      }
+      setStartTime(curStart);
+      setEndTime(calculateEndTimeOneHour(curStart));
       if (initialProfessionalId) setSelectedProfessionalId(initialProfessionalId);
       setIsBlockingMode(false);
+      setIsRepeat(false);
+      const [y, m, d] = curDate.split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        setRepeatDays([new Date(y, m - 1, d, 12, 0, 0).getDay()]);
+      }
     }
   }, [editingSession, initialDate, initialTime, initialProfessionalId, isOpen]);
 
@@ -230,6 +272,44 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
       }
     }
   }, [selectedPatientId, patients]);
+
+  const handleDateChange = (newDate: string) => {
+    setDate(newDate);
+    if (newDate) {
+      const [y, m, d] = newDate.split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        const dow = new Date(y, m - 1, d, 12, 0, 0).getDay();
+        setRepeatDays((prev) => {
+          if (prev.length <= 1) {
+            return [dow];
+          }
+          return prev;
+        });
+      }
+    }
+  };
+
+  const handleToggleRepeat = (checked: boolean) => {
+    setIsRepeat(checked);
+    if (checked && repeatDays.length === 0 && date) {
+      const [y, m, d] = date.split('-').map(Number);
+      if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+        const dow = new Date(y, m - 1, d, 12, 0, 0).getDay();
+        setRepeatDays([dow]);
+      }
+    }
+  };
+
+  const handleToggleDay = (dayId: number) => {
+    setRepeatDays((prev) => {
+      if (prev.includes(dayId)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((d) => d !== dayId);
+      } else {
+        return [...prev, dayId].sort((a, b) => a - b);
+      }
+    });
+  };
 
   // Recalcular horário de término ao alterar início
   const handleStartTimeChange = (newStart: string) => {
@@ -294,7 +374,11 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
       isEncaixe,
       reminderSms,
       reminderWhatsapp,
-      repeatWeekly
+      repeatWeekly: isRepeat && repeatFrequency === 'weekly',
+      repeat: isRepeat,
+      repeatFrequency: isRepeat ? repeatFrequency : undefined,
+      repeatCount: isRepeat ? repeatCount : undefined,
+      repeatDays: isRepeat ? repeatDays : undefined
     };
 
     onSave(sessionData);
@@ -365,48 +449,57 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
             <div className="sm:col-span-4">
               <label className="block text-xs font-bold text-gray-700 mb-1">
-                Data: *
+                Data:*
               </label>
               <input
                 type="date"
                 required
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
-                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-semibold outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-gray-300 rounded text-xs font-semibold text-gray-800 outline-none focus:border-blue-500 cursor-pointer"
               />
             </div>
 
             <div className="sm:col-span-5">
               <label className="block text-xs font-bold text-gray-700 mb-1">
-                Horário: *
+                Horário:*
               </label>
-              <div className="flex items-center gap-1.5">
-                <span className="text-gray-400 text-[11px]">das</span>
-                <input
-                  type="time"
-                  required
-                  value={startTime}
-                  onChange={(e) => handleStartTimeChange(e.target.value)}
-                  className="w-full px-2 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-                />
-                <span className="text-gray-400 text-[11px]">às</span>
-                <input
-                  type="time"
-                  required
-                  value={endTime}
-                  onChange={(e) => setEndTime(e.target.value)}
-                  className="w-full px-2 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-mono font-bold outline-none focus:ring-2 focus:ring-primary cursor-pointer"
-                />
+              <div className="flex items-center gap-2">
+                <div className="flex items-center flex-1 border border-gray-300 rounded bg-white overflow-hidden focus-within:border-blue-500">
+                  <span className="px-2 py-2 text-xs text-gray-500 bg-gray-50 border-r border-gray-200 select-none">
+                    das
+                  </span>
+                  <input
+                    type="time"
+                    required
+                    value={startTime}
+                    onChange={(e) => handleStartTimeChange(e.target.value)}
+                    className="w-full px-2 py-2 text-xs font-bold text-gray-800 outline-none bg-white cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex items-center flex-1 border border-gray-300 rounded bg-white overflow-hidden focus-within:border-blue-500">
+                  <span className="px-2 py-2 text-xs text-gray-500 bg-gray-50 border-r border-gray-200 select-none">
+                    às
+                  </span>
+                  <input
+                    type="time"
+                    required
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
+                    className="w-full px-2 py-2 text-xs font-bold text-gray-800 outline-none bg-white cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="sm:col-span-3 pb-2">
-              <label className="inline-flex items-center gap-2 cursor-pointer text-gray-700 font-semibold">
+            <div className="sm:col-span-3 pb-2.5">
+              <label className="inline-flex items-center gap-2 cursor-pointer text-gray-800 font-bold text-xs select-none">
                 <input
                   type="checkbox"
-                  checked={repeatWeekly}
-                  onChange={(e) => setRepeatWeekly(e.target.checked)}
-                  className="w-4 h-4 rounded text-primary focus:ring-primary"
+                  checked={isRepeat}
+                  onChange={(e) => handleToggleRepeat(e.target.checked)}
+                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300 cursor-pointer"
                 />
                 <span>Repetir</span>
               </label>
@@ -414,18 +507,84 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
           </div>
 
           {/* Linha 2: Encaixe */}
-          <div className="pt-1">
-            <label className="inline-flex items-center gap-2 cursor-pointer text-gray-700 font-medium">
+          <div className="pt-0.5">
+            <label className="inline-flex items-center gap-2 cursor-pointer text-gray-700 font-medium select-none">
               <input
                 type="checkbox"
                 checked={isEncaixe}
                 onChange={(e) => setIsEncaixe(e.target.checked)}
-                className="w-4 h-4 rounded text-primary focus:ring-primary"
+                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300 cursor-pointer"
               />
               <span>Realizar encaixe de horário para o atendimento</span>
-              <Info className="w-3.5 h-3.5 text-gray-400 hover:text-gray-600 cursor-help" />
+              <span className="text-gray-400 font-bold cursor-help" title="Permite agendar mesmo com conflito de horário">?</span>
             </label>
           </div>
+
+          {/* Repetição - Bloco Customizado */}
+          {isRepeat && (
+            <div className="bg-[#f4f9fd] border border-[#d6e8f6] rounded-md p-3.5 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-800 mb-1">
+                    Frequência:*
+                  </label>
+                  <select
+                    value={repeatFrequency}
+                    onChange={(e) => setRepeatFrequency(e.target.value as any)}
+                    className="w-full bg-white border border-gray-300 rounded px-3 py-2 text-xs text-gray-800 outline-none focus:border-blue-500 cursor-pointer"
+                  >
+                    <option value="weekly">Semanalmente</option>
+                    <option value="daily">Diariamente</option>
+                    <option value="biweekly">Quinzenalmente</option>
+                    <option value="monthly">Mensalmente</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-800 mb-1">
+                    Repetir:*
+                  </label>
+                  <div className="flex rounded border border-gray-300 bg-white overflow-hidden focus-within:border-blue-500">
+                    <input
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={repeatCount}
+                      onChange={(e) => setRepeatCount(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-full px-3 py-2 text-xs font-medium text-gray-800 outline-none"
+                    />
+                    <span className="bg-white border-l border-gray-200 px-3 py-2 text-xs text-gray-600 select-none flex items-center">
+                      sessões
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {(repeatFrequency === 'weekly' || repeatFrequency === 'biweekly' || repeatFrequency === 'daily') && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-800 mb-1.5">
+                    Dias para repetir:*
+                  </label>
+                  <div className="flex flex-wrap items-center gap-3 pt-0.5">
+                    {DAYS_OF_WEEK.map((day) => (
+                      <label
+                        key={day.id}
+                        className="inline-flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={repeatDays.includes(day.id)}
+                          onChange={() => handleToggleDay(day.id)}
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-gray-300 cursor-pointer"
+                        />
+                        <span>{day.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Linha 3: Profissional */}
           <div>
@@ -548,9 +707,8 @@ export const AppointmentModal: React.FC<AppointmentModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
-                <span>Senha/Autorização/Autenticador:</span>
-                <Info className="w-3 h-3 text-gray-400" />
+              <label className="block text-xs font-bold text-gray-700 mb-1">
+                Senha/Autorização/Autenticador:
               </label>
               <input
                 type="text"

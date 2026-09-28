@@ -212,18 +212,33 @@ export const unitsApi = {
 
 export const professionalsApi = {
     async getAll(): Promise<Professional[]> {
-        const { data: professionals, error } = await supabase
-            .from('professionals')
-            .select('*, professional_units(unit_id)');
+        const [profResult, servicesResult] = await Promise.all([
+            supabase.from('professionals').select('*, professional_units(unit_id)'),
+            supabase.from('professional_services').select('*')
+        ]);
 
-        if (error) throw error;
+        if (profResult.error) throw profResult.error;
 
-        return professionals.map(prof => ({
+        const servicesByProf: Record<string, any[]> = {};
+        if (servicesResult.data) {
+            for (const s of servicesResult.data) {
+                if (!servicesByProf[s.professional_id]) servicesByProf[s.professional_id] = [];
+                servicesByProf[s.professional_id].push({
+                    id: s.id,
+                    professionalId: s.professional_id,
+                    serviceName: s.service_name,
+                    commissionType: s.commission_type || 'percentage',
+                    commissionValue: Number(s.commission_value || 0)
+                });
+            }
+        }
+
+        return profResult.data.map(prof => ({
             id: prof.id,
             name: prof.name,
             crf: prof.crf,
             specialty: prof.specialty,
-            hourlyRate: prof.hourly_rate,
+            hourlyRate: Number(prof.hourly_rate || 0),
             unitIds: prof.professional_units?.map((pu: any) => pu.unit_id) || [],
             color: prof.color,
             avatarUrl: prof.avatar_url,
@@ -233,7 +248,12 @@ export const professionalsApi = {
             bankName: prof.bank_name,
             bankAgency: prof.bank_agency,
             bankAccount: prof.bank_account,
-            roles: prof.roles || ['professional']
+            roles: prof.roles || ['professional'],
+            contractType: prof.contract_type || 'pj',
+            baseSalary: Number(prof.base_salary || 0),
+            clinicFeeType: prof.clinic_fee_type || 'none',
+            clinicFeeValue: Number(prof.clinic_fee_value || 0),
+            services: servicesByProf[prof.id] || []
         }));
     },
 
@@ -253,7 +273,11 @@ export const professionalsApi = {
                 bank_name: professional.bankName || null,
                 bank_agency: professional.bankAgency || null,
                 bank_account: professional.bankAccount || null,
-                roles: professional.roles || ['professional']
+                roles: professional.roles || ['professional'],
+                contract_type: professional.contractType || 'pj',
+                base_salary: professional.baseSalary || 0,
+                clinic_fee_type: professional.clinicFeeType || 'none',
+                clinic_fee_value: professional.clinicFeeValue || 0
             })
             .select()
             .single();
@@ -266,6 +290,18 @@ export const professionalsApi = {
                 professional.unitIds.map(unitId => ({
                     professional_id: data.id,
                     unit_id: unitId
+                }))
+            );
+        }
+
+        // Link services if provided
+        if (professional.services && professional.services.length > 0) {
+            await supabase.from('professional_services').insert(
+                professional.services.map(s => ({
+                    professional_id: data.id,
+                    service_name: s.serviceName,
+                    commission_type: s.commissionType,
+                    commission_value: s.commissionValue
                 }))
             );
         }
@@ -295,23 +331,27 @@ export const professionalsApi = {
         if (updates.bankAgency !== undefined) updateData.bank_agency = updates.bankAgency;
         if (updates.bankAccount !== undefined) updateData.bank_account = updates.bankAccount;
         if (updates.roles !== undefined) updateData.roles = updates.roles;
+        if (updates.contractType !== undefined) updateData.contract_type = updates.contractType;
+        if (updates.baseSalary !== undefined) updateData.base_salary = updates.baseSalary;
+        if (updates.clinicFeeType !== undefined) updateData.clinic_fee_type = updates.clinicFeeType;
+        if (updates.clinicFeeValue !== undefined) updateData.clinic_fee_value = updates.clinicFeeValue;
 
-        const { error } = await supabase
-            .from('professionals')
-            .update(updateData)
-            .eq('id', id);
+        if (Object.keys(updateData).length > 0) {
+            const { error } = await supabase
+                .from('professionals')
+                .update(updateData)
+                .eq('id', id);
 
-        if (error) throw error;
+            if (error) throw error;
+        }
 
         // Update unit associations if provided
         if (updates.unitIds) {
-            // Delete existing associations
             await supabase
                 .from('professional_units')
                 .delete()
                 .eq('professional_id', id);
 
-            // Insert new associations
             if (updates.unitIds.length > 0) {
                 await supabase.from('professional_units').insert(
                     updates.unitIds.map(unitId => ({
@@ -322,7 +362,45 @@ export const professionalsApi = {
             }
         }
 
+        // Update services if provided
+        if (updates.services !== undefined) {
+            await supabase
+                .from('professional_services')
+                .delete()
+                .eq('professional_id', id);
+
+            if (updates.services.length > 0) {
+                await supabase.from('professional_services').insert(
+                    updates.services.map(s => ({
+                        professional_id: id,
+                        service_name: s.serviceName,
+                        commission_type: s.commissionType,
+                        commission_value: s.commissionValue
+                    }))
+                );
+            }
+        }
+
         return this.getById(id);
+    },
+
+    async saveServices(professionalId: string, services: any[]): Promise<void> {
+        await supabase
+            .from('professional_services')
+            .delete()
+            .eq('professional_id', professionalId);
+
+        if (services.length > 0) {
+            const { error } = await supabase.from('professional_services').insert(
+                services.map(s => ({
+                    professional_id: professionalId,
+                    service_name: s.serviceName,
+                    commission_type: s.commissionType,
+                    commission_value: s.commissionValue
+                }))
+            );
+            if (error) throw error;
+        }
     },
 
     async delete(id: string): Promise<void> {
@@ -408,11 +486,17 @@ const mapPatientFromDb = (p: any): Patient => ({
 });
 
 export const patientsApi = {
-    async getAll(): Promise<Patient[]> {
-        const { data: patients, error } = await supabase
+    async getAll(unitId?: string): Promise<Patient[]> {
+        let query = supabase
             .from('patients')
             .select('*, patient_plans(*)')
             .order('name', { ascending: true });
+
+        if (unitId && unitId !== 'ALL') {
+            query = query.eq('unit_id', unitId);
+        }
+
+        const { data: patients, error } = await query;
 
         if (error) throw error;
 
@@ -669,7 +753,10 @@ export const sessionsApi = {
             isOutsidePlan: session.is_outside_plan,
             price: session.price,
             signatureUrl: session.signature_url,
-            agreementId: session.agreement_id
+            agreementId: session.agreement_id,
+            isLateCancellation: session.is_late_cancellation ?? false,
+            packageSessionNumber: session.package_session_number,
+            packageTotalSessions: session.package_total_sessions
         }));
     },
 
@@ -697,7 +784,10 @@ export const sessionsApi = {
             isOutsidePlan: session.is_outside_plan,
             price: session.price,
             signatureUrl: session.signature_url,
-            agreementId: session.agreement_id
+            agreementId: session.agreement_id,
+            isLateCancellation: session.is_late_cancellation ?? false,
+            packageSessionNumber: session.package_session_number,
+            packageTotalSessions: session.package_total_sessions
         }));
     },
 
@@ -718,7 +808,10 @@ export const sessionsApi = {
                 is_outside_plan: session.isOutsidePlan ?? false,
                 price: session.price || null,
                 signature_url: session.signatureUrl,
-                agreement_id: session.agreementId || null
+                agreement_id: session.agreementId || null,
+                is_late_cancellation: session.isLateCancellation ?? false,
+                package_session_number: session.packageSessionNumber || null,
+                package_total_sessions: session.packageTotalSessions || null
             })
             .select()
             .single();
@@ -740,7 +833,10 @@ export const sessionsApi = {
             isOutsidePlan: data.is_outside_plan,
             price: data.price,
             signatureUrl: data.signature_url,
-            agreementId: data.agreement_id
+            agreementId: data.agreement_id,
+            isLateCancellation: data.is_late_cancellation ?? false,
+            packageSessionNumber: data.package_session_number,
+            packageTotalSessions: data.package_total_sessions
         };
     },
 
@@ -760,6 +856,9 @@ export const sessionsApi = {
         if (updates.price !== undefined) updateData.price = updates.price;
         if (updates.signatureUrl !== undefined) updateData.signature_url = updates.signatureUrl;
         if (updates.agreementId !== undefined) updateData.agreement_id = updates.agreementId;
+        if (updates.isLateCancellation !== undefined) updateData.is_late_cancellation = updates.isLateCancellation;
+        if (updates.packageSessionNumber !== undefined) updateData.package_session_number = updates.packageSessionNumber;
+        if (updates.packageTotalSessions !== undefined) updateData.package_total_sessions = updates.packageTotalSessions;
 
         const { data, error } = await supabase
             .from('sessions')
@@ -785,7 +884,10 @@ export const sessionsApi = {
             isOutsidePlan: data.is_outside_plan,
             price: data.price,
             signatureUrl: data.signature_url,
-            agreementId: data.agreement_id
+            agreementId: data.agreement_id,
+            isLateCancellation: data.is_late_cancellation ?? false,
+            packageSessionNumber: data.package_session_number,
+            packageTotalSessions: data.package_total_sessions
         };
     },
 
@@ -1071,16 +1173,21 @@ export const systemUsersApi = {
     },
 
     async getByEmail(email: string): Promise<SystemUser | null> {
+        const cleanEmail = (email || '').trim().toLowerCase();
+        if (!cleanEmail) return null;
+
         const { data, error } = await supabase
             .from('system_users')
             .select('*')
-            .eq('email', email)
-            .single();
+            .ilike('email', cleanEmail)
+            .maybeSingle();
 
         if (error) {
-            if (error.code === 'PGRST116') return null; // Not found
-            throw error;
+            console.error('Error fetching system user by email:', error);
+            return null;
         }
+
+        if (!data) return null;
 
         return {
             id: data.id,
@@ -1202,7 +1309,7 @@ export const infraMetricsApi = {
 export const managerMetricsApi = {
     async getStats(unitId?: string) {
         let sessionsQuery = supabase.from('sessions').select('*');
-        let patientsQuery = supabase.from('patients').select('*');
+        let patientsQuery = supabase.from('patients').select('*, patient_plans(*)');
 
         if (unitId && unitId !== 'ALL') {
             sessionsQuery = sessionsQuery.eq('unit_id', unitId);
@@ -1217,18 +1324,41 @@ export const managerMetricsApi = {
         const allSessions = sessions || [];
         const allPatients = patients || [];
 
-        const totalSessions = allSessions.length;
-        const completedSessions = allSessions.filter(s => s.status === 'Realizada').length;
-        const noShowSessions = allSessions.filter(s => s.status === 'Falta').length;
-        const cancelledSessions = allSessions.filter(s => s.status === 'Cancelada').length;
-        const confirmedSessions = allSessions.filter(s => s.status === 'Confirmada').length;
+        // Filtra pelo mês corrente (YYYY-MM) para precisão da gestão mensal
+        const currentMonth = new Date().toISOString().substring(0, 7);
+        const monthSessions = allSessions.filter(s => s.date && s.date.startsWith(currentMonth));
 
-        const occupancyRate = totalSessions > 0 ? Math.round((completedSessions + confirmedSessions) / (totalSessions * 1.2) * 100) : 75;
+        const totalSessions = monthSessions.length;
+        const completedSessions = monthSessions.filter(s => s.status === 'Realizada').length;
+        const noShowSessions = monthSessions.filter(s => s.status === 'Falta').length;
+        const cancelledSessions = monthSessions.filter(s => s.status === 'Cancelada').length;
+        const confirmedSessions = monthSessions.filter(s => s.status === 'Confirmada').length;
+        const scheduledSessions = monthSessions.filter(s => s.status === 'Agendada').length;
 
-        const patientsNeedingRenewal = allPatients.filter(p => {
-            const plan = (p as any).patient_plans?.[0] || (p as any).plan;
-            return plan && plan.remaining_sessions <= 2;
-        });
+        // Aproveitamento real da agenda: (Realizadas + Confirmadas) / Total Efetivo no mês
+        const totalEffective = totalSessions - cancelledSessions;
+        const occupancyRate = totalEffective > 0
+            ? Math.min(100, Math.round(((completedSessions + confirmedSessions) / totalEffective) * 100))
+            : (totalSessions > 0 ? 0 : 0);
+
+        // Pacientes ativos com planos próximos do fim (<= 2 sessões restantes)
+        const patientsNeedingRenewal = allPatients
+            .map(p => {
+                const plan = (p as any).patient_plans?.[0] || (p as any).plan;
+                if (!plan || plan.remaining_sessions === undefined) return null;
+                if (plan.remaining_sessions > 2) return null;
+                return {
+                    id: p.id,
+                    name: p.name,
+                    phone: p.phone,
+                    photoUrl: p.photo_url,
+                    planName: plan.name || 'Plano de Sessões',
+                    totalSessions: plan.total_sessions || 0,
+                    remainingSessions: Number(plan.remaining_sessions),
+                    expiresAt: plan.expires_at
+                };
+            })
+            .filter(Boolean);
 
         return {
             totalSessions,
@@ -1236,9 +1366,10 @@ export const managerMetricsApi = {
             noShowSessions,
             cancelledSessions,
             confirmedSessions,
-            occupancyRate: Math.min(occupancyRate, 95),
+            scheduledSessions,
+            occupancyRate,
             patientsNeedingRenewal,
-            totalPatients: allPatients.length
+            totalPatients: allPatients.filter(p => p.status === 'Active').length
         };
     }
 };
@@ -2233,6 +2364,78 @@ export const contractsApi = {
             .delete()
             .eq('id', id);
 
+        if (error) throw error;
+    }
+};
+
+export const patientPlansApi = {
+    async getAll(): Promise<any[]> {
+        const { data, error } = await supabase
+            .from('patient_plans')
+            .select('*, patients(id, name, unit_id)')
+            .order('payment_date', { ascending: false });
+        if (error) throw error;
+        return data || [];
+    },
+
+    async create(payload: {
+        patientId: string;
+        name: string;
+        totalSessions: number;
+        price: number;
+        paymentDate: string;
+        paymentMethod: string;
+    }): Promise<any> {
+        const { data, error } = await supabase
+            .from('patient_plans')
+            .insert({
+                patient_id: payload.patientId,
+                name: payload.name,
+                total_sessions: payload.totalSessions,
+                remaining_sessions: payload.totalSessions,
+                expires_at: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                total_paid: payload.price,
+                payment_status: 'paid',
+                payment_date: payload.paymentDate,
+                payment_method: payload.paymentMethod
+            })
+            .select('*, patients(id, name, unit_id)')
+            .single();
+        if (error) throw error;
+        return data;
+    },
+
+    async update(id: string, payload: Partial<{
+        name: string;
+        totalSessions: number;
+        price: number;
+        paymentDate: string;
+        paymentMethod: string;
+        paymentStatus: string;
+    }>): Promise<any> {
+        const updateData: any = {};
+        if (payload.name !== undefined) updateData.name = payload.name;
+        if (payload.totalSessions !== undefined) updateData.total_sessions = payload.totalSessions;
+        if (payload.price !== undefined) updateData.total_paid = payload.price;
+        if (payload.paymentDate !== undefined) updateData.payment_date = payload.paymentDate;
+        if (payload.paymentMethod !== undefined) updateData.payment_method = payload.paymentMethod;
+        if (payload.paymentStatus !== undefined) updateData.payment_status = payload.paymentStatus;
+
+        const { data, error } = await supabase
+            .from('patient_plans')
+            .update(updateData)
+            .eq('id', id)
+            .select('*, patients(id, name, unit_id)')
+            .single();
+        if (error) throw error;
+        return data;
+    },
+
+    async delete(id: string): Promise<void> {
+        const { error } = await supabase
+            .from('patient_plans')
+            .delete()
+            .eq('id', id);
         if (error) throw error;
     }
 };

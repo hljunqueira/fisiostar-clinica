@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, FileText, Activity, Save, User, Calendar, Stethoscope, Sparkles, Check, ChevronDown, Plus, Layers, MapPin, AlignLeft, Paperclip, Image, UploadCloud, Trash2 } from 'lucide-react';
-import { PatientEvaluation, Patient, Professional, Unit, UnitId, ClinicalTemplate, ClinicalTemplateSection, PainPoint } from '../types';
+import { PatientEvaluation, Patient, Professional, Unit, UnitId, ClinicalTemplate, ClinicalTemplateSection, PainPoint, isClinicalProfessional } from '../types';
 import { evaluationsApi, patientsApi, professionalsApi, unitsApi, clinicalTemplatesApi } from '../src/services/api';
 import { BodyPainMap } from './Clinical/BodyPainMap';
 import { ClinicalTemplateModal } from './Clinical/ClinicalTemplateModal';
@@ -100,8 +100,9 @@ export const EvaluationModal: React.FC<EvaluationModalProps> = ({
                     clinicalTemplatesApi.getByType('evaluation').catch(() => [])
                 ]);
 
+                const clinicalProfs = profs.filter(isClinicalProfessional);
                 setPatients(pats);
-                setProfessionals(profs);
+                setProfessionals(clinicalProfs);
                 setUnits(unitsList);
                 setTemplates(tmpls);
 
@@ -111,9 +112,9 @@ export const EvaluationModal: React.FC<EvaluationModalProps> = ({
 
                 // Match logged-in professional if none selected
                 let profId = selectedProfessionalId;
-                if (!profId && profs.length > 0) {
-                    const matchedProf = profs.find(p => p.email === systemUser?.email || p.name.toLowerCase() === systemUser?.name.toLowerCase());
-                    profId = matchedProf ? matchedProf.id : profs[0].id;
+                if (!profId && clinicalProfs.length > 0) {
+                    const matchedProf = clinicalProfs.find(p => p.email === systemUser?.email || p.name.toLowerCase() === systemUser?.name.toLowerCase());
+                    profId = matchedProf ? matchedProf.id : clinicalProfs[0].id;
                     setSelectedProfessionalId(profId);
                 }
 

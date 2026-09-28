@@ -122,36 +122,22 @@ export const calculateOverlappingLayout = (
         const durationMin = item.end - item.start;
 
         const top = (startMin - startHour * 60) * (hourHeight / 60);
-        const height = Math.max(34, durationMin * (hourHeight / 60) - 2);
+        const height = Math.max(46, durationMin * (hourHeight / 60) - 2);
 
         let leftPercent: number;
         let widthPercent: number;
 
         if (isWeekView) {
-          if (totalColumns === 1) {
-            leftPercent = 0;
-            widthPercent = 100;
-          } else if (totalColumns === 2) {
-            leftPercent = colIndex * 50;
-            widthPercent = 50;
-          } else {
-            // Efeito Cascata Inteligente para 3+ eventos na semana:
-            // Cada card mantém largura confortável (65% da coluna) com deslocamento gradual
-            const cardWidth = Math.max(55, 100 - (totalColumns - 1) * 11);
-            const step = (100 - cardWidth) / (totalColumns - 1);
-            leftPercent = colIndex * step;
-            widthPercent = cardWidth;
-          }
+          // Na Semana: divide a coluna do dia igualmente entre as sessões simultâneas
+          leftPercent = (colIndex * 100) / totalColumns;
+          widthPercent = 100 / totalColumns;
         } else {
-          // Visão Diária: Mais espaço horizontal
-          if (totalColumns <= 4) {
-            leftPercent = (colIndex * 100) / totalColumns;
-            widthPercent = 100 / totalColumns;
-          } else {
-            const cardWidth = Math.max(28, 100 / totalColumns);
-            leftPercent = (colIndex * 100) / totalColumns;
-            widthPercent = cardWidth;
-          }
+          // No Dia: layout ultra-compacto (7 colunas base ~14% cada)
+          // Elimina o espaço vazio excessivo dentro dos cards e permite 7+ atendimentos no mesmo horário
+          const maxSlots = Math.max(7, totalColumns);
+          const slotWidth = 100 / maxSlots;
+          leftPercent = colIndex * slotWidth;
+          widthPercent = slotWidth;
         }
 
         layoutMap.set(item.session.id, {

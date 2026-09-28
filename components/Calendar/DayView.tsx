@@ -165,7 +165,10 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
         const newTime = `${clampedHour.toString().padStart(2, '0')}:${newMinutes.toString().padStart(2, '0')}`;
 
         if (newTime !== draggingSession.time) {
-            onUpdateSession(draggingSession.id, { time: newTime });
+            const [h, m] = newTime.split(':').map(Number);
+            const endH = (h + 1) % 24;
+            const newEndTime = `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+            onUpdateSession(draggingSession.id, { time: newTime, endTime: newEndTime, duration: 60 });
         }
 
         setDraggingSession(null);
@@ -272,29 +275,29 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                             <div
                                                 key={session.id}
                                                 onClick={() => onEditSession(session)}
-                                                className="absolute p-2 px-3 rounded-lg border-l-[4px] border-l-amber-500 bg-slate-100 text-slate-800 text-xs cursor-pointer hover:z-50 hover:shadow-xl hover:scale-[1.01] transition-all overflow-hidden border border-slate-300 shadow-xs"
+                                                className="absolute p-1 px-1.5 rounded-md border-l-[3px] border-l-amber-500 bg-slate-100 text-slate-800 text-[11px] cursor-pointer hover:z-50 hover:shadow-lg transition-all overflow-hidden border border-slate-300 shadow-xs"
                                                 style={{
                                                     top: `${topOffset + 1}px`,
-                                                    height: `${layout ? Math.max(36, layout.height) : 56}px`,
+                                                    height: `${layout ? Math.max(46, layout.height) : 54}px`,
                                                     left: leftStyle,
                                                     width: widthStyle,
                                                     zIndex
                                                 }}
                                                 title={`🔒 Horário Bloqueado: ${session.time} - ${prof?.name || ''} (${session.notes || 'Indisponível'}) - Clique para editar ou liberar`}
                                             >
-                                                <div className="flex flex-col justify-center h-full">
-                                                    <div className="flex items-center justify-between gap-1">
-                                                        <div className="flex items-center gap-1.5 min-w-0">
-                                                            <Lock className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                                            <span className="font-bold text-xs text-slate-900 truncate">
+                                                <div className="flex flex-col justify-between h-full py-0.5">
+                                                    <div className="flex items-center justify-between gap-1 leading-none">
+                                                        <div className="flex items-center gap-1 min-w-0">
+                                                            <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                                                            <span className="font-bold text-[11px] text-slate-900 truncate">
                                                                 {isMultiCol ? 'Bloqueio' : 'Bloqueio de Horário'}
                                                             </span>
                                                         </div>
-                                                        <span className="text-[10px] font-mono text-slate-500 font-bold shrink-0">
+                                                        <span className="text-[9px] font-mono text-slate-500 font-bold shrink-0">
                                                             {session.time.substring(0, 5)}
                                                         </span>
                                                     </div>
-                                                    <div className="text-[10px] text-slate-600 truncate mt-0.5 font-medium">
+                                                    <div className="text-[9px] text-slate-600 truncate font-medium leading-tight">
                                                         {prof?.name ? `${prof.name} ` : ''}{!isMultiCol && session.notes ? `• ${session.notes}` : ''}
                                                     </div>
                                                 </div>
@@ -309,10 +312,10 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                             onDragStart={(e) => handleDragStart(e, session)}
                                             onDragEnd={handleDragEnd}
                                             onClick={() => onEditSession(session)}
-                                            className={`absolute p-2 px-3 rounded-lg border-l-[4px] text-xs cursor-pointer hover:z-50 hover:shadow-xl hover:scale-[1.01] transition-all overflow-hidden border border-black/10 shadow-xs ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                            className={`absolute p-1 px-1.5 rounded-md border-l-[3px] text-[11px] cursor-pointer hover:z-50 hover:shadow-lg transition-all overflow-hidden border border-black/10 shadow-xs bg-white ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
                                             style={{
                                                 top: `${topOffset + 1}px`,
-                                                height: `${layout ? Math.max(36, layout.height) : 56}px`,
+                                                height: `${layout ? Math.max(46, layout.height) : 54}px`,
                                                 left: leftStyle,
                                                 width: widthStyle,
                                                 zIndex,
@@ -320,16 +323,16 @@ const DayView: React.FC<DayViewProps> = ({ date, sessions, professionals, patien
                                             }}
                                             title={`${session.time} - Paciente: ${patient?.name || 'Sem nome'} | Profissional: ${prof?.name || 'Não informado'} - Arraste para mover`}
                                         >
-                                            <div className="flex flex-col justify-center h-full">
-                                                <div className="flex items-center justify-between gap-1">
-                                                    <span className="font-bold text-xs text-gray-900 truncate">
+                                            <div className="flex flex-col justify-between h-full py-0.5">
+                                                <div className="flex items-center justify-between gap-1 leading-none">
+                                                    <span className="font-bold text-[11px] leading-tight text-gray-900 truncate">
                                                         {patient?.name || 'Paciente'}
                                                     </span>
-                                                    <span className="text-[10px] font-mono text-gray-500 font-bold shrink-0">
+                                                    <span className="text-[9px] font-mono text-gray-500 font-bold shrink-0">
                                                         {session.time.substring(0, 5)}
                                                     </span>
                                                 </div>
-                                                <div className="text-[10px] opacity-85 truncate mt-0.5 font-medium text-gray-700">
+                                                <div className="text-[9px] opacity-85 truncate font-medium text-gray-700 leading-tight">
                                                     {session.type || 'Sessão'} {prof?.name ? `• ${prof.name}` : ''}
                                                 </div>
                                             </div>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, FileText, Printer, CheckCircle2, User, Calendar, Clock, DollarSign, Stethoscope, Building2 } from 'lucide-react';
-import { Patient, Professional, Unit, UnitId } from '../types';
+import { Patient, Professional, Unit, UnitId, isClinicalProfessional } from '../types';
 import { patientsApi, professionalsApi, unitsApi } from '../src/services/api';
 import toast from 'react-hot-toast';
 
@@ -60,15 +60,16 @@ export const DocumentGeneratorModal: React.FC<DocumentGeneratorModalProps> = ({
                     unitsApi.getAll()
                 ]);
 
+                const clinicalProfs = profs.filter(isClinicalProfessional);
                 setPatients(pats);
-                setProfessionals(profs);
+                setProfessionals(clinicalProfs);
                 setUnits(unitsList);
 
                 if (!selectedUnitId && unitsList.length > 0) {
                     setSelectedUnitId(unitsList[0].id);
                 }
-                if (!selectedProfessionalId && profs.length > 0) {
-                    setSelectedProfessionalId(profs[0].id);
+                if (!selectedProfessionalId && clinicalProfs.length > 0) {
+                    setSelectedProfessionalId(clinicalProfs[0].id);
                 }
             } catch (err) {
                 console.error('Erro ao carregar dados do gerador de documentos:', err);

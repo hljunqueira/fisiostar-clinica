@@ -49,24 +49,37 @@ export const DEFAULT_COLOR_CONFIG: ColorConfig = {
     }
 };
 
+export const hexToLightBackground = (hex: string): string => {
+    if (!hex || hex.length < 6) return '#eff6ff';
+    const cleanHex = hex.startsWith('#') ? hex.slice(1) : hex;
+    const r = parseInt(cleanHex.slice(0, 2), 16) || 0;
+    const g = parseInt(cleanHex.slice(2, 4), 16) || 0;
+    const b = parseInt(cleanHex.slice(4, 6), 16) || 0;
+    // Blend 14% cor + 86% branco puro = cor de fundo pastel sólida e 100% opaca
+    const bgR = Math.round(r * 0.14 + 255 * 0.86);
+    const bgG = Math.round(g * 0.14 + 255 * 0.86);
+    const bgB = Math.round(b * 0.14 + 255 * 0.86);
+    return `rgb(${bgR}, ${bgG}, ${bgB})`;
+};
+
 export const getColorStyles = (entry?: ColorEntry) => {
     if (!entry) {
         return {
-            className: 'bg-blue-50 border-l-blue-500 text-blue-900',
+            className: 'bg-blue-50 border-l-blue-500 text-slate-900',
             dotClassName: 'bg-blue-500',
-            style: {},
+            style: { backgroundColor: '#eff6ff', borderLeftColor: '#3b82f6' },
             dotStyle: {}
         };
     }
 
     if (entry.hex) {
         return {
-            className: 'border-l-[3px]',
+            className: 'border-l-[4px] shadow-xs',
             dotClassName: '',
             style: {
-                backgroundColor: `${entry.hex}1F`, // ~12% opacity
+                backgroundColor: hexToLightBackground(entry.hex),
                 borderLeftColor: entry.hex,
-                color: entry.hex
+                color: '#0f172a'
             },
             dotStyle: {
                 backgroundColor: entry.hex

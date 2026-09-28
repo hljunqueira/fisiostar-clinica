@@ -29,11 +29,6 @@ const Login: React.FC = () => {
         }
     };
 
-    const demoLogin = (roleEmail: string) => {
-        setEmail(roleEmail);
-        setPassword('123456');
-    };
-
     return (
         <div className="w-screen h-screen min-h-screen flex flex-col lg:flex-row overflow-hidden bg-slate-900 font-sans">
             {/* Lado Esquerdo - Minimalista: Apenas Logo, Título e Frase (50% Desktop) */}
@@ -194,34 +189,6 @@ const Login: React.FC = () => {
                             )}
                         </button>
                     </form>
-
-                    {/* Acesso Rápido (Demo) */}
-                    <div className="pt-6 border-t border-slate-100 space-y-3">
-                        <p className="text-center text-xs font-semibold text-slate-400 uppercase tracking-wider">Acesso Rápido (Demo)</p>
-                        <div className="grid grid-cols-3 gap-2.5">
-                            <button
-                                type="button"
-                                onClick={() => demoLogin('admin@fisiostar.com')}
-                                className="py-2.5 px-3 bg-slate-50 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 transition-all text-center"
-                            >
-                                Admin
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => demoLogin('nay@fisiostar.com')}
-                                className="py-2.5 px-3 bg-slate-50 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 transition-all text-center"
-                            >
-                                Secretaria
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => demoLogin('pedro@fisiostar.com')}
-                                className="py-2.5 px-3 bg-slate-50 hover:bg-blue-50 hover:border-blue-200 hover:text-blue-700 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 transition-all text-center"
-                            >
-                                Profissional
-                            </button>
-                        </div>
-                    </div>
                 </div>
 
                 {/* Footer Suporte WhatsApp */}

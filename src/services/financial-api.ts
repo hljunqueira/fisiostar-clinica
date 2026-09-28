@@ -34,11 +34,19 @@ export const paymentsApi = {
         return data.map(p => ({
             id: p.id,
             professionalId: p.professional_id,
+            unitId: p.unit_id,
             periodStart: p.period_start,
             periodEnd: p.period_end,
             totalSessions: p.total_sessions,
-            amountPerSession: p.amount_per_session,
-            totalAmount: p.total_amount,
+            amountPerSession: Number(p.amount_per_session || 0),
+            totalAmount: Number(p.total_amount || 0),
+            baseSalary: Number(p.base_salary || 0),
+            commissionAmount: Number(p.commission_amount || 0),
+            advancesDeducted: Number(p.advances_deducted || 0),
+            clinicFeeDeducted: Number(p.clinic_fee_deducted || 0),
+            netAmount: Number(p.net_amount !== null && p.net_amount !== undefined ? p.net_amount : p.total_amount),
+            verifiedSessionsCount: p.verified_sessions_count || p.total_sessions || 0,
+            auditDetails: p.audit_details || [],
             status: p.status,
             paidAt: p.paid_at,
             paidBy: p.paid_by,
@@ -57,11 +65,20 @@ export const paymentsApi = {
             .from('payments')
             .insert({
                 professional_id: payment.professionalId,
+                unit_id: payment.unitId || null,
                 period_start: payment.periodStart,
                 period_end: payment.periodEnd,
                 total_sessions: payment.totalSessions,
                 amount_per_session: payment.amountPerSession,
                 total_amount: payment.totalAmount,
+                base_salary: payment.baseSalary || 0,
+                commission_amount: payment.commissionAmount || 0,
+                advances_deducted: payment.advancesDeducted || 0,
+                clinic_fee_deducted: payment.clinicFeeDeducted || 0,
+                net_amount: payment.netAmount !== undefined ? payment.netAmount : payment.totalAmount,
+                verified_sessions_count: payment.verifiedSessionsCount || payment.totalSessions,
+                audit_details: payment.auditDetails || [],
+                notes: payment.notes || null,
                 status: 'pending'
             })
             .select()
@@ -72,11 +89,19 @@ export const paymentsApi = {
         return {
             id: data.id,
             professionalId: data.professional_id,
+            unitId: data.unit_id,
             periodStart: data.period_start,
             periodEnd: data.period_end,
             totalSessions: data.total_sessions,
-            amountPerSession: data.amount_per_session,
-            totalAmount: data.total_amount,
+            amountPerSession: Number(data.amount_per_session || 0),
+            totalAmount: Number(data.total_amount || 0),
+            baseSalary: Number(data.base_salary || 0),
+            commissionAmount: Number(data.commission_amount || 0),
+            advancesDeducted: Number(data.advances_deducted || 0),
+            clinicFeeDeducted: Number(data.clinic_fee_deducted || 0),
+            netAmount: Number(data.net_amount || data.total_amount || 0),
+            verifiedSessionsCount: data.verified_sessions_count || data.total_sessions || 0,
+            auditDetails: data.audit_details || [],
             status: data.status,
             paidAt: data.paid_at,
             paidBy: data.paid_by,
@@ -109,11 +134,19 @@ export const paymentsApi = {
         return {
             id: data.id,
             professionalId: data.professional_id,
+            unitId: data.unit_id,
             periodStart: data.period_start,
             periodEnd: data.period_end,
             totalSessions: data.total_sessions,
-            amountPerSession: data.amount_per_session,
-            totalAmount: data.total_amount,
+            amountPerSession: Number(data.amount_per_session || 0),
+            totalAmount: Number(data.total_amount || 0),
+            baseSalary: Number(data.base_salary || 0),
+            commissionAmount: Number(data.commission_amount || 0),
+            advancesDeducted: Number(data.advances_deducted || 0),
+            clinicFeeDeducted: Number(data.clinic_fee_deducted || 0),
+            netAmount: Number(data.net_amount || data.total_amount || 0),
+            verifiedSessionsCount: data.verified_sessions_count || data.total_sessions || 0,
+            auditDetails: data.audit_details || [],
             status: data.status,
             paidAt: data.paid_at,
             paidBy: data.paid_by,
@@ -358,6 +391,8 @@ export const revenuesApi = {
             category: r.category,
             description: r.description,
             amount: r.amount,
+            feePercentage: Number(r.fee_percentage || 0),
+            netAmount: Number(r.net_amount || r.amount),
             revenueDate: r.date,
             paymentMethod: r.payment_method,
             received: r.received,
@@ -381,6 +416,8 @@ export const revenuesApi = {
                 category: revenue.category,
                 description: revenue.description,
                 amount: revenue.amount,
+                fee_percentage: revenue.feePercentage || 0,
+                net_amount: revenue.netAmount || revenue.amount,
                 date: revenue.revenueDate,
                 payment_method: revenue.paymentMethod,
                 created_by: revenue.createdBy
@@ -398,6 +435,8 @@ export const revenuesApi = {
             category: data.category,
             description: data.description,
             amount: data.amount,
+            feePercentage: Number(data.fee_percentage || 0),
+            netAmount: Number(data.net_amount || data.amount),
             revenueDate: data.date,
             paymentMethod: data.payment_method,
             received: data.received,
@@ -450,6 +489,96 @@ export const revenuesApi = {
             .from('revenues')
             .delete()
             .eq('id', id);
+
+        if (error) throw error;
+    }
+};
+
+// =====================================================
+// EMPLOYEE ADVANCES API (VALES E ADIANTAMENTOS)
+// =====================================================
+
+export const advancesApi = {
+    async getAll(filters?: { professionalId?: string; unitId?: string; status?: string }): Promise<any[]> {
+        let query = supabase
+            .from('employee_advances')
+            .select('*')
+            .order('advance_date', { ascending: false });
+
+        if (filters?.professionalId) {
+            query = query.eq('professional_id', filters.professionalId);
+        }
+        if (filters?.unitId && filters.unitId !== 'ALL') {
+            query = query.eq('unit_id', filters.unitId);
+        }
+        if (filters?.status) {
+            query = query.eq('status', filters.status);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        return data.map(d => ({
+            id: d.id,
+            professionalId: d.professional_id,
+            unitId: d.unit_id,
+            amount: Number(d.amount || 0),
+            advanceDate: d.advance_date,
+            description: d.description,
+            paymentMethod: d.payment_method,
+            status: d.status,
+            deductedInPaymentId: d.deducted_in_payment_id,
+            createdBy: d.created_by,
+            createdAt: d.created_at
+        }));
+    },
+
+    async create(advance: {
+        professionalId: string;
+        unitId?: string;
+        amount: number;
+        advanceDate: string;
+        description?: string;
+        paymentMethod?: string;
+        createdBy?: string;
+    }): Promise<any> {
+        const { data, error } = await supabase
+            .from('employee_advances')
+            .insert({
+                professional_id: advance.professionalId,
+                unit_id: advance.unitId || null,
+                amount: advance.amount,
+                advance_date: advance.advanceDate,
+                description: advance.description || null,
+                payment_method: advance.paymentMethod || 'pix',
+                status: 'pending',
+                created_by: advance.createdBy || null
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    },
+
+    async delete(id: string): Promise<void> {
+        const { error } = await supabase
+            .from('employee_advances')
+            .delete()
+            .eq('id', id);
+
+        if (error) throw error;
+    },
+
+    async markAsDeducted(ids: string[], paymentId: string): Promise<void> {
+        if (!ids || ids.length === 0) return;
+        const { error } = await supabase
+            .from('employee_advances')
+            .update({
+                status: 'deducted',
+                deducted_in_payment_id: paymentId
+            })
+            .in('id', ids);
 
         if (error) throw error;
     }

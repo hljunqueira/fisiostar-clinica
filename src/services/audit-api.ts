@@ -44,7 +44,14 @@ export const auditApi = {
         userRole: l.user_role || 'admin',
         category: (l.module?.toLowerCase() || 'system') as any,
         action: l.action,
-        details: typeof l.details === 'string' ? l.details : JSON.stringify(l.details || {}),
+        tableName: l.table_name || undefined,
+        recordId: l.record_id || undefined,
+        oldData: l.old_data || undefined,
+        newData: l.new_data || undefined,
+        changedFields: l.changed_fields || (l.details && typeof l.details === 'object' && l.details.changed_fields ? l.details.changed_fields : undefined),
+        details: typeof l.details === 'string'
+          ? l.details
+          : (l.details?.message || l.details?.summary || JSON.stringify(l.details || {})),
         createdAt: l.created_at
       }));
     } catch (e) {

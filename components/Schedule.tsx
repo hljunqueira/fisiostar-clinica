@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { UnitId, Session, Patient, Professional, Unit, SessionStatus, Agreement } from '../types';
+import { UnitId, Session, Patient, Professional, Unit, SessionStatus, Agreement, isClinicalProfessional } from '../types';
 import AppointmentModal from './AppointmentModal';
 import { SessionQuickModal } from './Calendar/SessionQuickModal';
 import { sessionsApi, patientsApi, professionalsApi, unitsApi, agreementsApi } from '../src/services/api';
@@ -15,6 +15,7 @@ import MonthView from './Calendar/MonthView';
 import DayListView from './Calendar/DayListView';
 import WeekListView from './Calendar/WeekListView';
 import { getSavedScheduleConfig } from './Settings/ScheduleSettingsTab';
+import { generateRepeatSessionDates } from '../src/utils/repetition';
 
 interface ScheduleProps {
     currentUnit: UnitId;
@@ -28,9 +29,25 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
     const [viewMode, setViewMode] = useState<ViewMode>(scheduleConfig.defaultView || 'week'); // Default to week view
 
     // Filters
-    const [filterProf, setFilterProf] = useState<string>(searchParams.get('professionalId') || 'all');
+    const [selectedProfIds, setSelectedProfIds] = useState<string[]>(() => {
+        const initialProf = searchParams.get('professionalId');
+        return initialProf && initialProf !== 'all' && initialProf !== 'multiple' ? [initialProf] : [];
+    });
+    const filterProf = selectedProfIds.length === 1 ? selectedProfIds[0] : (selectedProfIds.length === 0 ? 'all' : 'multiple');
+    const setFilterProf = (id: string) => {
+        if (id === 'all') {
+            setSelectedProfIds([]);
+        } else if (id && id !== 'multiple') {
+            setSelectedProfIds([id]);
+        }
+    };
+    const handleSetSelectedProfIds = (ids: string[]) => {
+        const clean = ids.filter(id => id && id !== 'all' && id !== 'multiple');
+        setSelectedProfIds(clean);
+    };
     const [filterSpecialty, setFilterSpecialty] = useState<string>('all');
     const [filterStatus, setFilterStatus] = useState<string>('all');
+    const [filterAgreement, setFilterAgreement] = useState<string>('all');
     const [filterPatient, setFilterPatient] = useState<string>('');
     const [isSyncing, setIsSyncing] = useState(false);
     const [, setRefreshColor] = useState(0);
@@ -95,7 +112,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
             }
 
             setPatients(patientsData);
-            setProfessionals(professionalsData);
+            setProfessionals(professionalsData.filter(isClinicalProfessional));
 
         } catch (error) {
             console.error('Error loading schedule data:', error);
@@ -105,12 +122,17 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
 
     // Apply Filters
     const filteredSessions = sessions.filter(s => {
-        const isProf = filterProf === 'all' || s.professionalId === filterProf;
+        const isProf = selectedProfIds.length === 0 || selectedProfIds.includes(s.professionalId);
         const isSpecialty = filterSpecialty === 'all' || s.type === filterSpecialty;
         const isStatus = filterStatus === 'all' || s.status === filterStatus;
+        const isAgreement = filterAgreement === 'all'
+            ? true
+            : filterAgreement === 'particular'
+                ? (!s.agreementId || s.agreementId === '')
+                : s.agreementId === filterAgreement;
         const patient = patients.find(p => p.id === s.patientId);
         const isPatientMatch = !filterPatient || (patient?.name.toLowerCase().includes(filterPatient.toLowerCase().trim()));
-        return isProf && isSpecialty && isStatus && isPatientMatch;
+        return isProf && isSpecialty && isStatus && isAgreement && isPatientMatch;
     });
 
     const handleEditSession = (session: Session) => {
@@ -137,7 +159,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
         setEditingSession(null);
         setModalInitialDate(dateStr);
         setModalInitialTime(time);
-        setModalInitialProf(filterProf !== 'all' ? filterProf : undefined);
+        setModalInitialProf(selectedProfIds.length === 1 ? selectedProfIds[0] : undefined);
         setIsAppointmentModalOpen(true);
     };
 
@@ -157,28 +179,47 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
             } else {
                 await sessionsApi.create(sessionData);
 
-                // Se solicitou repetição semanal
-                if (sessionData.repeatWeekly) {
-                    const repeatCount = scheduleConfig.defaultRepeatCount || 10;
-                    const baseDate = new Date(`${sessionData.date}T12:00:00`);
-                    const promises = [];
-                    for (let i = 1; i < repeatCount; i++) {
-                        const nextDate = new Date(baseDate);
-                        nextDate.setDate(baseDate.getDate() + (i * 7));
-                        const y = nextDate.getFullYear();
-                        const m = (nextDate.getMonth() + 1).toString().padStart(2, '0');
-                        const d = nextDate.getDate().toString().padStart(2, '0');
-                        const nextDateStr = `${y}-${m}-${d}`;
-                        promises.push(
+                // Se solicitou repetição
+                if (sessionData.repeat && sessionData.repeatCount && sessionData.repeatCount > 1) {
+                    const dates = generateRepeatSessionDates(
+                        sessionData.date,
+                        sessionData.repeatFrequency || 'weekly',
+                        sessionData.repeatCount,
+                        sessionData.repeatDays || []
+                    );
+                    const repeatDates = dates.slice(1);
+                    if (repeatDates.length > 0) {
+                        const promises = repeatDates.map((dStr) =>
                             sessionsApi.create({
                                 ...sessionData,
-                                date: nextDateStr,
+                                date: dStr,
+                                repeat: false,
                                 repeatWeekly: false
                             })
                         );
+                        await Promise.allSettled(promises);
+                        toast.success(`Agendamento e ${repeatDates.length} repetições criados com sucesso!`);
+                    } else {
+                        toast.success('Agendamento criado com sucesso!');
                     }
-                    await Promise.allSettled(promises);
-                    toast.success(`Agendamento e ${repeatCount - 1} repetições criados com sucesso!`);
+                } else if (sessionData.repeatWeekly) {
+                    const repeatCount = scheduleConfig.defaultRepeatCount || 10;
+                    const dates = generateRepeatSessionDates(sessionData.date, 'weekly', repeatCount);
+                    const repeatDates = dates.slice(1);
+                    if (repeatDates.length > 0) {
+                        const promises = repeatDates.map((dStr) =>
+                            sessionsApi.create({
+                                ...sessionData,
+                                date: dStr,
+                                repeat: false,
+                                repeatWeekly: false
+                            })
+                        );
+                        await Promise.allSettled(promises);
+                        toast.success(`Agendamento e ${repeatDates.length} repetições criados com sucesso!`);
+                    } else {
+                        toast.success('Agendamento criado com sucesso!');
+                    }
                 } else {
                     toast.success('Agendamento criado com sucesso!');
                 }
@@ -338,10 +379,15 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                 onDateSelect={setSelectedDate}
                 filterProf={filterProf}
                 setFilterProf={setFilterProf}
+                selectedProfIds={selectedProfIds}
+                setSelectedProfIds={handleSetSelectedProfIds}
                 filterSpecialty={filterSpecialty}
                 setFilterSpecialty={setFilterSpecialty}
                 filterStatus={filterStatus}
                 setFilterStatus={setFilterStatus}
+                filterAgreement={filterAgreement}
+                setFilterAgreement={setFilterAgreement}
+                agreements={agreements}
                 filterPatient={filterPatient}
                 setFilterPatient={setFilterPatient}
                 unit={unit}
@@ -350,7 +396,7 @@ const Schedule: React.FC<ScheduleProps> = ({ currentUnit }) => {
                     setEditingSession(null);
                     setModalInitialDate(undefined);
                     setModalInitialTime(undefined);
-                    setModalInitialProf(filterProf !== 'all' ? filterProf : undefined);
+                    setModalInitialProf(selectedProfIds.length === 1 ? selectedProfIds[0] : undefined);
                     setIsAppointmentModalOpen(true);
                 }}
                 onSyncGoogle={handleSyncGoogle}

@@ -174,7 +174,13 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
         const newDate = formatDateYMD(targetDate);
 
         const updates: Partial<Session> = {};
-        if (newTime !== draggingSession.time) updates.time = newTime;
+        if (newTime !== draggingSession.time) {
+            updates.time = newTime;
+            const [h, m] = newTime.split(':').map(Number);
+            const endH = (h + 1) % 24;
+            updates.endTime = `${endH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+            updates.duration = 60;
+        }
         if (newDate !== draggingSession.date) updates.date = newDate;
 
         if (Object.keys(updates).length > 0) {
@@ -301,7 +307,7 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
 
                                         const [sessionHour, sessionMin] = session.time.split(':').map(Number);
                                         const topOffset = layout ? layout.top : ((sessionHour - startHour) * 60 + (sessionMin / 60) * 60);
-                                        const cardHeight = layout ? `${layout.height}px` : '55px';
+                                        const cardHeight = layout ? `${Math.max(46, layout.height)}px` : '54px';
                                         const leftStyle = layout ? `calc(${layout.leftPercent}% + 1px)` : '2px';
                                         const widthStyle = layout ? `calc(${layout.widthPercent}% - 2px)` : 'calc(100% - 4px)';
                                         const zIndex = layout ? layout.zIndex : 10;
@@ -319,7 +325,7 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                                 <div
                                                     key={session.id}
                                                     onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
-                                                    className="absolute p-1.5 rounded-lg border-l-[4px] border-l-amber-500 bg-slate-100/95 text-slate-800 text-[10px] leading-tight cursor-pointer hover:z-50 hover:shadow-2xl hover:scale-[1.03] transition-all overflow-hidden border border-slate-300/80 shadow-xs ring-1 ring-black/5"
+                                                    className="absolute p-1 sm:p-1.5 px-1.5 rounded-md border-l-[3px] border-l-amber-500 bg-slate-100/95 text-slate-800 text-[10px] leading-tight cursor-pointer hover:z-50 hover:shadow-lg transition-all overflow-hidden border border-slate-300/80 shadow-xs"
                                                     style={{
                                                         top: `${topOffset}px`,
                                                         height: cardHeight,
@@ -329,15 +335,17 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                                     }}
                                                     title={`🔒 Horário Bloqueado: ${session.time} - ${professional?.name || ''} (${session.notes || 'Indisponível'}) - Clique para editar ou liberar`}
                                                 >
-                                                    <div className="flex items-center justify-between gap-1 font-bold text-slate-900 truncate">
-                                                        <div className="flex items-center gap-1 min-w-0">
-                                                            <Lock className="w-3 h-3 text-amber-600 shrink-0" />
-                                                            <span className="truncate">{isMultiCol ? 'Bloqueio' : 'Bloqueio de Horário'}</span>
+                                                    <div className="flex flex-col justify-between h-full py-0.5">
+                                                        <div className="flex items-center justify-between gap-1 font-bold text-slate-900 leading-none">
+                                                            <div className="flex items-center gap-1 min-w-0">
+                                                                <Lock className="w-3 h-3 text-amber-600 shrink-0" />
+                                                                <span className="truncate">{isMultiCol ? 'Bloqueio' : 'Bloqueio de Horário'}</span>
+                                                            </div>
+                                                            <span className="text-[9px] font-mono text-slate-500 font-semibold shrink-0">{session.time.substring(0, 5)}</span>
                                                         </div>
-                                                        <span className="text-[9px] font-mono text-slate-500 font-semibold shrink-0">{session.time.substring(0, 5)}</span>
-                                                    </div>
-                                                    <div className="text-[9px] text-slate-600 truncate mt-0.5 font-medium">
-                                                        {professional?.name ? `${professional.name} ` : ''}{!isMultiCol && session.notes ? `• ${session.notes}` : ''}
+                                                        <div className="text-[9px] text-slate-600 truncate font-medium leading-tight">
+                                                            {professional?.name ? `${professional.name} ` : ''}{!isMultiCol && session.notes ? `• ${session.notes}` : ''}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             );
@@ -350,7 +358,7 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                                 onDragStart={(e) => handleDragStart(e, session)}
                                                 onDragEnd={handleDragEnd}
                                                 onClick={(e) => { e.stopPropagation(); onEditSession(session); }}
-                                                className={`absolute p-1.5 rounded-lg border-l-[4px] text-[10px] leading-tight cursor-pointer hover:z-50 hover:shadow-2xl hover:scale-[1.03] transition-all overflow-hidden border border-black/10 shadow-xs ring-1 ring-black/5 ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                                                className={`absolute p-1 sm:p-1.5 px-1.5 rounded-md border-l-[3px] text-[10px] leading-tight cursor-pointer hover:z-50 hover:shadow-lg transition-all overflow-hidden border border-black/10 shadow-xs bg-white ${colorStyles.className} ${isDragging ? 'opacity-50 scale-95' : ''} ${onUpdateSession ? 'cursor-grab active:cursor-grabbing' : ''}`}
                                                 style={{
                                                     top: `${topOffset}px`,
                                                     height: cardHeight,
@@ -362,18 +370,18 @@ const WeekView: React.FC<WeekViewProps> = ({ currentDate, sessions, professional
                                                 title={`${session.time} - Paciente: ${patient?.name || 'Sem nome'} | Profissional: ${professional?.name || 'Não informado'} - Arraste para mover`}
                                             >
                                                 <div className="flex items-start justify-between h-full">
-                                                    <div className="flex flex-col flex-1 min-h-0">
-                                                        <div className="flex items-center justify-between gap-1">
-                                                            <div className="font-black truncate text-[11px] leading-3 text-gray-900">
+                                                    <div className="flex flex-col flex-1 min-h-0 justify-between h-full py-0.5">
+                                                        <div className="flex items-center justify-between gap-1 leading-none">
+                                                            <div className="font-bold truncate text-[11px] leading-tight text-gray-900">
                                                                 {patient?.name || 'Paciente'}
                                                             </div>
                                                             <span className="text-[9px] font-mono text-gray-600 font-bold shrink-0">{session.time.substring(0, 5)}</span>
                                                         </div>
-                                                        <div className="opacity-85 truncate text-[9px] mt-0.5 font-semibold text-gray-700">
+                                                        <div className="opacity-85 truncate text-[9px] font-medium text-gray-700 leading-tight">
                                                             {session.type || 'Sessão'} {professional?.name ? `• ${professional.name}` : ''}
                                                         </div>
                                                     </div>
-                                                    {onUpdateSession && !isMultiCol && <GripVertical className="w-3 h-3 opacity-40 shrink-0 ml-0.5" />}
+                                                    {onUpdateSession && !isMultiCol && <GripVertical className="w-3 h-3 opacity-40 shrink-0 ml-0.5 mt-0.5" />}
                                                 </div>
                                             </div>
                                         );

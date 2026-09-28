@@ -32,6 +32,7 @@ import { EvaluationModal } from './components/EvaluationModal';
 import { EvolutionModal } from './components/EvolutionModal';
 import AppointmentModal from './components/AppointmentModal';
 import { NotificationBell } from './components/Notifications/NotificationBell';
+import { generateRepeatSessionDates } from './src/utils/repetition';
 
 // Lazy Load Components
 const Dashboard = React.lazy(() => import('./components/Dashboard'));
@@ -65,6 +66,8 @@ const Sidebar = ({
   isOpen,
   onClose,
   userRole,
+  userEmail,
+  userCustomPermissions,
   onLogout,
   permissions,
   isCollapsed,
@@ -74,6 +77,8 @@ const Sidebar = ({
   onClose: () => void,
   currentPath: string,
   userRole: UserRole,
+  userEmail?: string,
+  userCustomPermissions?: PermissionKey[],
   onLogout: () => void,
   permissions: RolePermissions,
   isCollapsed: boolean,
@@ -84,14 +89,13 @@ const Sidebar = ({
   const allLinks: { icon: React.ReactNode, label: string, path: string, permission: PermissionKey }[] = [
     { icon: <LayoutDashboard className="w-5 h-5" />, label: 'Dashboard', path: '/', permission: 'view_dashboard' },
     // Professional Portal sub-links
-    { icon: <LayoutDashboard className="w-5 h-5" />, label: 'Visão Geral', path: '/meu-portal', permission: 'access_professional_portal' },
+    { icon: <LayoutDashboard className="w-5 h-5" />, label: 'Meu Portal', path: '/meu-portal', permission: 'access_professional_portal' },
     { icon: <Calendar className="w-5 h-5" />, label: 'Minha Agenda', path: '/meu-portal/agenda', permission: 'access_professional_portal' },
-    { icon: <DollarSign className="w-5 h-5" />, label: 'Financeiro', path: '/meu-portal/financeiro', permission: 'access_professional_portal' },
+    { icon: <DollarSign className="w-5 h-5" />, label: 'Minha Produção', path: '/meu-portal/financeiro', permission: 'access_professional_portal' },
     // Admin/Secretary/Manager/Financial links
     { icon: <Calendar className="w-5 h-5" />, label: 'Agenda Geral', path: '/agenda', permission: 'view_schedule' },
     { icon: <DoorClosed className="w-5 h-5" />, label: 'Reserva de Salas', path: '/reserva-salas', permission: 'view_rooms' },
     { icon: <Users className="w-5 h-5" />, label: 'Pacientes', path: '/pacientes', permission: 'manage_patients' },
-    { icon: <Briefcase className="w-5 h-5" />, label: 'Equipe', path: '/profissionais', permission: 'manage_team' },
     { icon: <CreditCard className="w-5 h-5" />, label: 'Serviços e Planos', path: '/servicos-planos', permission: 'manage_plans' },
     { icon: <DollarSign className="w-5 h-5" />, label: 'Financeiro Geral', path: '/financeiro', permission: 'view_financials' },
     { icon: <MessageSquare className="w-5 h-5" />, label: 'Chat Interno', path: '/chat', permission: 'access_internal_chat' },
@@ -110,6 +114,11 @@ const Sidebar = ({
   const allowedLinks = allLinks.filter(link => {
     if (link.path === '/') {
       return userPermissions.some(p => dashboardPermissions.includes(p));
+    }
+    // Links do portal clínico pessoal (Meu Portal, Minha Agenda, Minha Produção)
+    // são exibidos exclusivamente para o perfil de profissional:
+    if (link.permission === 'access_professional_portal') {
+      return userRole === 'professional';
     }
     return userPermissions.includes(link.permission);
   });
@@ -240,6 +249,8 @@ interface LayoutProps {
   setCurrentUnit: (unit: UnitId) => void;
   userRole: UserRole;
   userName: string;
+  userEmail?: string;
+  userCustomPermissions?: PermissionKey[];
   userAvatarUrl?: string;
   currentUserId?: string;
   onOpenProfileModal?: () => void;
@@ -259,6 +270,8 @@ const Layout: React.FC<LayoutProps> = ({
   setCurrentUnit,
   userRole,
   userName,
+  userEmail,
+  userCustomPermissions,
   userAvatarUrl,
   currentUserId,
   onOpenProfileModal,
@@ -309,6 +322,8 @@ const Layout: React.FC<LayoutProps> = ({
         onClose={() => setSidebarOpen(false)}
         currentPath={pathname}
         userRole={userRole}
+        userEmail={userEmail}
+        userCustomPermissions={userCustomPermissions}
         onLogout={onLogout}
         permissions={permissions}
         isCollapsed={isSidebarCollapsed}
@@ -468,10 +483,21 @@ const Layout: React.FC<LayoutProps> = ({
                   <p className="text-xs font-bold text-gray-800 truncate">{userName}</p>
                 </div>
                 <div className="p-1">
+                  {(userRole === 'admin' || userRole === 'super_admin') && (userEmail?.toLowerCase().includes('pedro') || userEmail?.toLowerCase().includes('wlisses') || userCustomPermissions?.includes('access_professional_portal')) && (
+                    <button
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        navigate('/meu-portal');
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs sm:text-sm hover:bg-blue-50 rounded-lg flex items-center gap-2.5 text-blue-700 font-semibold transition-colors mb-1"
+                    >
+                      <Stethoscope className="w-4 h-4 text-blue-600" /> Meu Atendimento Clínico
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       setIsProfileMenuOpen(false);
-                      onOpenProfileModal();
+                      if (onOpenProfileModal) onOpenProfileModal();
                     }}
                     className="w-full px-3 py-2 text-left text-xs sm:text-sm hover:bg-gray-50 rounded-lg flex items-center gap-2.5 text-gray-700 font-semibold transition-colors"
                   >
@@ -507,7 +533,31 @@ const Layout: React.FC<LayoutProps> = ({
             onSave={async (newSession) => {
               try {
                 await sessionsApi.create(newSession);
-                toast.success('Agendamento criado com sucesso!');
+                if (newSession.repeat && newSession.repeatCount && newSession.repeatCount > 1) {
+                  const dates = generateRepeatSessionDates(
+                    newSession.date,
+                    newSession.repeatFrequency || 'weekly',
+                    newSession.repeatCount,
+                    newSession.repeatDays || []
+                  );
+                  const repeatDates = dates.slice(1);
+                  if (repeatDates.length > 0) {
+                    const promises = repeatDates.map((dStr) =>
+                      sessionsApi.create({
+                        ...newSession,
+                        date: dStr,
+                        repeat: false,
+                        repeatWeekly: false
+                      })
+                    );
+                    await Promise.allSettled(promises);
+                    toast.success(`Agendamento e ${repeatDates.length} repetições criados com sucesso!`);
+                  } else {
+                    toast.success('Agendamento criado com sucesso!');
+                  }
+                } else {
+                  toast.success('Agendamento criado com sucesso!');
+                }
               } catch (err: any) {
                 toast.error(err.message || 'Erro ao agendar.');
               }
@@ -716,10 +766,13 @@ const AppContent: React.FC = () => {
     );
   }
 
+  // Determine access to professional portal
+  const canAccessPortal = hasPermission('access_professional_portal') || role === 'professional' || ((role === 'admin' || role === 'super_admin') && (systemUser?.email?.toLowerCase().includes('pedro') || systemUser?.email?.toLowerCase().includes('wlisses')));
+
   // Determine the default route based on user permissions
   const getDefaultRoute = () => {
     if (hasPermission('view_dashboard')) return '/';
-    if (hasPermission('access_professional_portal')) return '/meu-portal';
+    if (canAccessPortal) return '/meu-portal';
     if (hasPermission('view_schedule')) return '/agenda';
     if (hasPermission('manage_patients')) return '/pacientes';
     return '/'; // Fallback - will show dashboard anyway
@@ -731,6 +784,8 @@ const AppContent: React.FC = () => {
       setCurrentUnit={setCurrentUnit}
       userRole={role}
       userName={systemUser.name}
+      userEmail={systemUser.email}
+      userCustomPermissions={systemUser.customPermissions}
       userAvatarUrl={systemUser.avatarUrl}
       currentUserId={systemUser.id}
       onOpenProfileModal={() => setIsProfileModalOpen(true)}
@@ -784,9 +839,7 @@ const AppContent: React.FC = () => {
           } />
 
           <Route path="/profissionais" element={
-            hasPermission('manage_team')
-              ? <Professionals currentUnit={currentUnit} />
-              : <Navigate to={getDefaultRoute()} replace />
+            <Navigate to="/financeiro" replace />
           } />
 
           <Route path="/unidades" element={
@@ -820,7 +873,7 @@ const AppContent: React.FC = () => {
           } />
 
           <Route path="/meu-portal" element={
-            hasPermission('access_professional_portal')
+            canAccessPortal
               ? <ProfessionalPortal
                 currentUnit={currentUnit}
                 announcements={announcements}
@@ -829,7 +882,7 @@ const AppContent: React.FC = () => {
               : <Navigate to={getDefaultRoute()} replace />
           } />
           <Route path="/meu-portal/agenda" element={
-            hasPermission('access_professional_portal')
+            canAccessPortal
               ? <ProfessionalPortal
                 currentUnit={currentUnit}
                 announcements={announcements}
@@ -838,7 +891,7 @@ const AppContent: React.FC = () => {
               : <Navigate to={getDefaultRoute()} replace />
           } />
           <Route path="/meu-portal/financeiro" element={
-            hasPermission('access_professional_portal')
+            canAccessPortal
               ? <ProfessionalPortal
                 currentUnit={currentUnit}
                 announcements={announcements}
@@ -847,7 +900,7 @@ const AppContent: React.FC = () => {
               : <Navigate to={getDefaultRoute()} replace />
           } />
           <Route path="/meu-portal/comunicados" element={
-            hasPermission('access_professional_portal')
+            canAccessPortal
               ? <ProfessionalPortal
                 currentUnit={currentUnit}
                 announcements={announcements}

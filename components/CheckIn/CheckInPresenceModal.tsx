@@ -216,7 +216,7 @@ export const CheckInPresenceModal: React.FC<CheckInPresenceModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-gray-900">Presença & Biometria Facial</h2>
-              <p className="text-xs text-gray-500">Validação de aula/sessão e débito automático</p>
+              <p className="text-xs text-gray-500">Validação de atendimento/sessão e débito automático</p>
             </div>
           </div>
 
@@ -801,7 +801,7 @@ export const CheckInPresenceModal: React.FC<CheckInPresenceModalProps> = ({
                 required
                 value={revertReason}
                 onChange={(e) => setRevertReason(e.target.value)}
-                placeholder="Ex: Paciente passou mal e remarcou a aula, check-in duplicado..."
+                placeholder="Ex: Paciente passou mal e remarcou a sessão, check-in duplicado..."
                 className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-rose-500 text-gray-800 font-medium"
               />
             </div>

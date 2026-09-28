@@ -1,0 +1,133 @@
+# Scratchpad & Histórico de Sessões
+
+## Tarefa Atual
+- [x] Refatoração do módulo Financeiro em 1 página unificada com folha de pagamento, conferência de sessões, comissões por serviço e vales.
+- [x] Inclusão de dados reais de Setembro/2026 (Semana 21-25 e mês 01 a 30) a partir das planilhas reais de Pedro (Sócio), Douglas, Maria Laura, Gabriel, Jeniffer, Danielle, Camila, Maíli, Giovanni e Wlisses.
+- [x] Regime especial de Sócio com pró-labore + comissão (`socio`) para Dr. Pedro.
+- [x] Remoção de "Equipe" da Sidebar e incorporação na aba interna "Equipe, Contratos & Comissões" dentro do Financeiro Integrado.
+- [x] Regra clínica de desmarcação em cima da hora com cobrança integral ("dar com aula realizada"), com identificação visual destacada (`⚠️ Avisou em Cima da Hora - Aula Cobrada`) e botão de ação direta.
+- [x] Contador de sessões de pacote (`📦 Sessão X de Y`) integrado às sessões e relatórios.
+- [x] Produção Bruta vs. Comissão vs. Margem Retida da Clínica computadas e visíveis.
+- [x] Modal de Exportação com filtros avançados (Profissional, Status da Folha, Tipo de Atendimento Normal vs Em Cima da Hora, Unidade e Período) e 3 formatos de saída (Impressão/PDF, WhatsApp e CSV Excel).
+- [x] Correção de erro na exportação de todos os relatórios (fallbacks de `clinicRetained` e proteção contra dados nulos) e adição do filtro atemporal (`♾️ Atemporal (Todo o Histórico)`).
+- [x] Modal de Auditoria de Sessões (`SessionAuditModal`):
+  - Coluna explícita com a porcentagem e valor retido da Clínica por atendimento (`Clínica (%) / Retido`).
+  - Total geral bruto por aula, comissões e repasses discriminados.
+  - Correção do layout da listagem com seletor compacto em linha para eliminar sobreposição e corte da terceira linha.
+  - Linha totalizadora `<tfoot>` sticky na base da tabela e rodapé consolidado dos 5 pilares em tempo real.
+- [x] Filtro de múltiplos profissionais na Agenda com Checkboxes:
+  - Substituição do `<select>` nativo único por um componente Popover Multiselect moderno com Checkboxes.
+  - Correção de sobreposição/corte visual: remoção do `overflow-hidden` do container do header e ajuste de `overflow-visible` na barra de filtros com `z-index: 50` para sobrepor perfeitamente a grade do calendário sem ser ceifado.
+  - Correção de erro `TypeError: Cannot read properties of undefined (reading 'hex')`: blindagem da função `getProfColor` para tratar índices negativos (`findIndex` retornando `-1` quando a lista de profissionais ainda não carregou do backend), garantindo fallback seguro para `#3B82F6`.
+  - Tratamento de conexão WebSocket Realtime no `AuthContext`: detecção do status `CHANNEL_ERROR` para remover canal graciosa e imediatamente sem loops de reconexão.
+  - Correção da causa-raiz do estado fantasma `'multiple'`: remoção da chamada de sobrescrita concorrente em `CalendarHeader.tsx` e sanitização estrita dos IDs para que a seleção funcione perfeitamente em todas as 5 visualizações (`Mês`, `Dia`, `Semana`, `Lista do dia`, `Lista da semana`).
+  - Conversão dos itens do dropdown em `<label>` acessíveis sem hacks de `stopPropagation()`, permitindo clique fluido e confiável tanto no checkbox quanto no nome do profissional.
+  - Resolução de nomes do gatilho a partir do catálogo global de profissionais, garantindo exibição de nomes corretos mesmo ao alternar filtros de unidade.
+- [x] Desbloqueio de Acesso Integral às Configurações para Super Admin:
+  - Correção de tipagem em `Settings.tsx` e `ScheduleSettingsTab.tsx`: alinhamento de `currentRole === 'superadmin'` para `currentRole === 'super_admin' || currentRole === 'superadmin' || authUser?.role === 'super_admin'`.
+  - Liberação imediata de todos os 6 painéis de ajustes para Super Admin: "Configurações da Agenda", "Usuários e Permissões", "Filiais e Unidades", "Salas de Atendimento", "Convênios & Parcerias" e "Logs de Auditoria & Sistema".
+- [x] Auditoria Forense Completa em Todas as Tabelas de Negócio (Triggers PostgreSQL):
+  - Criação da migração `supabase/audit_triggers_all_tables.sql` e execução remota via `psql` no Postgres da VPS (`mdr-vps`).
+  - 22 triggers de banco de dados ativos capturando `INSERT`, `UPDATE` e `DELETE` em `patients`, `sessions`, `system_users`, `units`, `agreements`, `rooms`, `expenses`, `revenues`, `payments`, etc.
+  - Captura granular em JSONB dos campos alterados (`changed_fields` com `{ old: ..., new: ... }`), ignorando ruído de timestamps internos e omitindo campos sensíveis/senhas.
+  - Atualização de `AuditLogsTab.tsx` com novo modal interativo "Antes vs Depois" permitindo inspecionar campo a campo exatamente o que cada usuário alterou.
+  - Exportação CSV enriquecida com Tabela, ID de Registro e Lista de Campos Alterados.
+- [x] Sincronização e Auditoria Completa de Usuários e Equipe:
+  - 24 colaboradores identificados nas planilhas e cadastrados em `auth.users` e `system_users`.
+  - Renomeado Dr. Pedro Barros (corrigindo Pedro Santos).
+  - 4.989 pacientes reais deduplicados por nome e CPF importados no PostgreSQL.
+  - Credenciais documentadas em `CREDENCIAIS_ACESSO_FISIOSTAR.md`.
+
+## Log de Modificações Recentes
+- **Banco de Dados**:
+  - `sessions`: adicionadas colunas `is_late_cancellation`, `package_session_number`, `package_total_sessions`.
+  - `revenues`: adicionadas colunas `fee_percentage`, `net_amount`.
+  - `seed_real_clinical_data.sql`: executado com dados reais de Setembro/2026 (semana 21 a 25/09/2026 e mês 01 a 30/09/2026), vales reais de Douglas (R$ 1.385,00) e Maria Laura (R$ 432,18).
+  - Migrações e dados aplicados com sucesso na VPS (`mdr-vps`).
+- **Tipagem & API**:
+  - [src/types.ts](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/src/types.ts) e [src/types/financial.ts](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/src/types/financial.ts) atualizados com `clinicRetained` e `clinicPercentage`.
+  - [src/services/api.ts](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/src/services/api.ts) e [src/services/financial-api.ts](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/src/services/financial-api.ts) mapeando os novos campos.
+- **Interface & Componentes**:
+  - [App.tsx](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/App.tsx): Item "Equipe" removido da Sidebar; rota `/profissionais` redirecionada para `/financeiro`.
+  - [components/Professionals.tsx](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/components/Professionals.tsx): Adicionado regime `👑 Sócio` com pró-labore e badge visual.
+  - [components/Financial.tsx](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/components/Financial.tsx):
+    - Sub-abas: `Conferência de Folha & Sessões` | `Equipe, Contratos & Comissões` | `Fluxo de Caixa & Lançamentos`.
+    - Componente `<Professionals />` embutido na aba de equipe.
+    - Colunas de Produção Bruta e Margem Retida da Clínica no painel da equipe.
+    - `SessionAuditModal`: coluna `Clínica (%) / Retido`, layout compacto de linha, eliminação de sobreposição e rodapé de métricas dos 5 pilares.
+    - `ExportReportModal`: correção da geração de CSV para todos os profissionais e inclusão do botão `♾️ Atemporal (Todo o Histórico)` sem limitação de datas.
+- **Deploy em Produção**:
+  - Script `deploy-fisiostar.ps1` executado com sucesso.
+- **Refatoração Impeccable & Auditoria de Agenda no Financeiro**:
+  - [x] Correção do badge de período contábil (`formatDateBR`) exibindo o mês completo `01/09/2026 à 30/09/2026` sem distorção UTC.
+  - [x] Painel Comparativo: Agenda FisioStar vs Financeiro cruzando em tempo real Realizadas, Confirmadas e Agendadas com seletor de base de folha (Realizadas, Confirmadas, Toda a Agenda).
+  - [x] Ação rápida "Tornar Realizada" no `SessionAuditModal` com persistência direta e reatividade imediata no estado local e banco Supabase.
+  - [x] Aplicação integral da Skill Impeccable em [components/Financial.tsx](file:///c:/Users/Henrique%20-%20PC/Desktop/Projetos%20Dev/fisiostar-clinica/components/Financial.tsx):
+    - Remoção de 100% dos emojis e eliminação de sinais duplicados.
+    - Extrato de WhatsApp reformulado com formatação sóbria e profissional.
+- **Configurações & Gestão de Unidade de Usuários (`Settings.tsx`)**:
+  - [x] Seletor direto de Unidade no card de cada colaborador e no `UserModal` de cadastro/edição.
+  - [x] Persistência reativa em `systemUsersApi.update` salvando `unitId` no PostgreSQL.
+  - [x] Input de busca instantânea por nome, e-mail ou cargo.
+  - [x] Design clean e refinado, sem nenhum emoji, com tipografia clínica e badges discretos de unidade e cargo.
+- **Auditoria Financeira & Fechamento Impecável (`SessionAuditModal` & Planilha Pedro)**:
+  - [x] Edição inline completa de cada atendimento (Preço bruto da aula, Forma de Pagamento, Taxa da Maquininha, Comissão %/R$).
+  - [x] Coluna Forma de Pagamento com opções `Dinheiro (0%)`, `PIX (0%)`, `Débito (1,45%)`, `Crédito (3,51%)`, `SumUp (0%)` e aplicação em lote.
+  - [x] Coluna Taxa Maquininha e cálculo automático do desconto em R$ e Líquido Pós-Cartão conforme a planilha real do Pedro.
+  - [x] Toggle "Taxa da Clínica":
+    - Padrão **desligado (0% retido, 100% de repasse líquido)** para Sócios como o Dr. Pedro Barros.
+    - Padrão ativado com margem configurável para os demais profissionais.
+    - Alternância em tempo real com recálculo instantâneo de toda a folha.
+  - [x] Coluna "Atendente" com seletor de profissional:
+    - Se o atendimento foi realizado por outro profissional, permite transferir ou marcar cobertura por colega.
+    - Ao transferir, executa `sessionsApi.update(sessionId, { professionalId: targetProfId })` e transfere a sessão para a **conferência individual** do substituto.
+    - A sessão sai da folha do titular e passa a ser creditada na folha do substituto.
+  - [x] Rodapé consolidado com os 6 totalizadores fiéis à planilha real: Total Bruto, Taxas Maquininha, Repasse Profissional, Margem da Clínica, Vales Deduzidos e Líquido a Pagar.
+- **Edição e Criação Integrada de Sessões, Pacientes e Pacotes na Auditoria (`SessionAuditModal`)**:
+  - [x] Filtro estrito de secretárias/recepção nos seletores clínicos (`isSecretaryProfessional` / `isClinicalProfessional`) em todos os componentes (`Financial`, `AppointmentModal`, `Patients`, `EvaluationModal`, `EvolutionModal`, `DocumentGeneratorModal`, `Schedule`, `RoomBookingView`, `Professionals`).
+  - [x] Transferência flexível de sessões/atendimentos:
+    - Seletor com optgroups: "Transferir Atendimento (100% Repasse)" e "Cobertura de Atendimento (50% Repasse)".
+    - Link rápido "Transferir 100%" ao marcar cobertura.
+    - Botão "Transferir" direto na coluna Ações com modal que permite transferir atendimento individual ou em lote (todos os atendimentos do paciente no período).
+  - [x] Modal `AuditEditSessionModal` integrado na auditoria financeira com 4 blocos atômicos vinculados ao banco de dados:
+    1. **Data e Hora**: edição de `date` e `time` salvando em `sessions`.
+    2. **Paciente**: busca reativa com filtro, edição inline cadastral de nome e telefone via `patientsApi.update`, e botão "+ Novo Paciente" abrindo `QuickPatientModal` (`patientsApi.create`) com vínculo imediato à sessão.
+    3. **Procedimento**: chips rápidos de especialidades (`COMMON_MODALITIES`: Pilates, Fisioterapia, RPG, Drenagem, etc.) e input de procedimento customizado salvando em `sessions.type`.
+    4. **Pacote / Plano Vinculado**: checkbox "Esta sessão faz parte de um Pacote / Plano", vínculo a pacotes existentes do paciente em `patient_plans`, botão "+ Cadastrar Novo Pacote" (chamando `patientPlansApi.create`), e contadores `packageSessionNumber` e `packageTotalSessions`.
+  - [x] Gatilhos visuais interativos na tabela: células `Data/Hora`, `Paciente` e `Procedimento / Pacote` com hover e ícone de edição, além do botão "Editar" na coluna Ações.
+  - [x] Reatividade em memória e recálculo imediato de totais com `sessionEdits`.
+- **Padronização de Nomenclatura Clínica (Adeus ao termo "aula")**:
+  - [x] Substituição de 100% das ocorrências de "aula" / "aulas" por terminologia clínica formal:
+    - Pacotes e unidades de tratamento: **"Sessão" / "Sessões"** (ex: `Pacote 10 Sessões (10S)`, `Total de Sessões`, `Sessão 3/10`, `Sessões Restantes`).
+    - Agendamentos e cobranças operacionais: **"Atendimento" / "Atendimento Cobrado"** (ex: `Avisou em Cima da Hora (Atendimento Cobrado)`, `Cobrar Atendimento`, `Total Atendimento (R$)`, `Transferir Atendimento`).
+  - [x] Arquivos ajustados:
+    - `components/Financial.tsx` (tabelas de auditoria, modais, tooltips, templates de pacotes e exportação).
+    - `components/Dashboard.tsx` (card de "Sessões Restantes").
+    - `components/Totem/TotemCheckIn.tsx` (mensagem acolhedora "Tenha um excelente atendimento!").
+    - `components/CheckIn/CheckInPresenceModal.tsx` (validação de presença e justificativas).
+    - `src/types.ts` e `src/types/financial.ts` (comentários técnicos e contratos de auditoria).
+  - [x] Validação fresca: `npx tsc --noEmit` com 0 erros e `npm run build` gerado com sucesso.
+- **Auditoria Geral de Dashboards & Conexões Reais ao Banco de Dados**:
+  - [x] **`SecretaryDashboard.tsx`**:
+    - Reatividade e isolamento por unidade: corrigido `useEffect` para escutar `currentUnit` e repassar o filtro para `patientsApi.getAll(unitId)` e `sessionsApi.getAll({ unitId })`.
+    - Eliminação de vazamento multi-unidade: contagem de pacientes ativos filtrando rigorosamente por `(currentUnit === 'ALL' || p.unitId === currentUnit) && p.status === 'Active'`.
+  - [x] **`src/services/api.ts` (`patientsApi.getAll`)**:
+    - Suporte a filtro por `unitId?: string` com cláusula `.eq('unit_id', unitId)` direta no PostgreSQL do Supabase, retrocompatível com chamadas sem argumentos.
+  - [x] **`src/services/api.ts` (`managerMetricsApi.getStats`)**:
+    - Resolução de relação de pacotes: consulta de pacientes corrigida para `.select('*, patient_plans(*)')`, permitindo leitura real de planos e sessões restantes.
+    - Ocupação/Aproveitamento real da agenda: substituída fórmula arbitrária anterior por cálculo real do mês corrente: `(Realizadas + Confirmadas) / (Total - Canceladas)`.
+    - Alerta real de renovação de pacotes (`patientsNeedingRenewal`): extrai pacientes ativos cujos planos possuem $\le 2$ sessões restantes ou estão zerados.
+    - Escopo mensal estrito: métricas de agendamento calculadas sobre o mês corrente (`YYYY-MM`).
+  - [x] **`ManagerDashboard.tsx`**:
+    - Lista dinâmica de renovação: substituição do card estático por lista interativa de pacientes necessitando renovação de pacote com badge de sessões restantes, plano e telefone para contato.
+    - Filtro de equipe clínica: profissionais filtrados por `isClinicalProfessional(prof)` e `currentUnit`, ocultando equipe de recepção/secretaria do quadro de metas clínicas.
+  - [x] **`ProfessionalPortal.tsx`**:
+    - Remoção de simulação fake do Google Calendar (`setTimeout` com toast falso); substituído por indicador informativo de sincronização.
+    - Correção de cálculo de "Próximos Atendimentos": comparação por data/hora ISO sem distorção de fuso horário.
+    - Eliminação de CRF fake hardcoded (`'CREFITO-3/67890-F'`); utilização do CRF real do profissional cadastrado.
+  - [x] **`Dashboard.tsx` (Dashboard Geral Admin)**:
+    - Receita mensal consolidada real: faturamento calculado somando receitas avulsas (`revenues`) com vendas de pacotes pagas no mês (`patient_plans.total_paid` com `payment_date` no mês).
+    - Substituição do `prompt()` do navegador por modal integrado `AddAnnouncementModal` com seleção de destinatários (Todos, Fisioterapeutas, Recepção) e tipo de comunicado.
+  - [x] **Verificação Completa**:
+    - `npx tsc --noEmit`: 0 erros de TypeScript.
+    - `npm run build`: Vite build bem-sucedido em produção.

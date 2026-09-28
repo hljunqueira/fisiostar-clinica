@@ -40,7 +40,6 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = {
     'view_financials',
     'manage_plans',
     'edit_settings',
-    'access_professional_portal',
     'access_internal_chat',
     'manage_chat_channels',
     'manage_rooms',
@@ -285,6 +284,50 @@ export interface Professional {
   bankAgency?: string;
   bankAccount?: string;
   roles?: string[]; // Ex: ['professional', 'secretary']
+  contractType?: 'pj' | 'clt' | 'partnership' | 'socio';
+  baseSalary?: number;
+  clinicFeeType?: 'none' | 'percentage' | 'fixed';
+  clinicFeeValue?: number;
+  services?: ProfessionalService[];
+}
+
+export const isSecretaryProfessional = (p?: { roles?: string[]; specialty?: string; name?: string } | null): boolean => {
+  if (!p) return false;
+  if (p.roles && p.roles.includes('secretary') && !p.roles.includes('professional') && !p.roles.includes('admin') && !p.roles.includes('super_admin')) {
+    return true;
+  }
+  const spec = (p.specialty || '').toLowerCase();
+  if (spec.includes('secret') || spec.includes('recep')) {
+    return true;
+  }
+  return false;
+};
+
+export const isClinicalProfessional = (p?: { roles?: string[]; specialty?: string; name?: string } | null): boolean => {
+  if (!p) return false;
+  return !isSecretaryProfessional(p);
+};
+
+export interface ProfessionalService {
+  id?: string;
+  professionalId?: string;
+  serviceName: string;
+  commissionType: 'percentage' | 'fixed';
+  commissionValue: number;
+}
+
+export interface EmployeeAdvance {
+  id: string;
+  professionalId: string;
+  unitId?: string;
+  amount: number;
+  advanceDate: string;
+  description?: string;
+  paymentMethod?: 'pix' | 'cash' | 'bank_transfer' | 'check';
+  status: 'pending' | 'deducted' | 'cancelled';
+  deductedInPaymentId?: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface Plan {
@@ -387,6 +430,13 @@ export interface Session {
   reminderSms?: string; // Sem lembrete, 1 dia antes, 2 horas antes
   reminderWhatsapp?: string; // Sem lembrete, 1 dia antes, 2 horas antes
   repeatWeekly?: boolean;
+  repeat?: boolean;
+  repeatFrequency?: 'weekly' | 'daily' | 'biweekly' | 'monthly';
+  repeatCount?: number;
+  repeatDays?: number[];
+  isLateCancellation?: boolean; // Desmarcou em cima da hora (atendimento cobrado)
+  packageSessionNumber?: number; // Ex: Sessão 3
+  packageTotalSessions?: number; // Ex: de 8
 }
 
 // --- Mapeamento de Pontos de Dor no Corpo Humano (Body Pain Map) ---
@@ -569,6 +619,11 @@ export interface AuditLogItem {
   userRole: UserRole | string;
   category: AuditCategory;
   action: string;
+  tableName?: string;
+  recordId?: string;
+  oldData?: Record<string, any> | null;
+  newData?: Record<string, any> | null;
+  changedFields?: Record<string, { old: any; new: any }> | null;
   details: string | any;
   ipAddress?: string;
   createdAt: string;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Activity, Save, User, Calendar, Clock, Stethoscope, Sparkles, Check, ChevronDown, Plus, Layers, MapPin, AlignLeft, CheckSquare, Trash2 } from 'lucide-react';
-import { PatientEvolution, Patient, Professional, Session, Unit, UnitId, ClinicalTemplate, ClinicalTemplateSection, PainPoint } from '../types';
+import { PatientEvolution, Patient, Professional, Session, Unit, UnitId, ClinicalTemplate, ClinicalTemplateSection, PainPoint, isClinicalProfessional } from '../types';
 import { evolutionsApi, patientsApi, professionalsApi, sessionsApi, unitsApi, clinicalTemplatesApi } from '../src/services/api';
 import { BodyPainMap } from './Clinical/BodyPainMap';
 import { ClinicalTemplateModal } from './Clinical/ClinicalTemplateModal';
@@ -98,8 +98,9 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
                     clinicalTemplatesApi.getByType('evolution').catch(() => [])
                 ]);
 
+                const clinicalProfs = profs.filter(isClinicalProfessional);
                 setPatients(pats);
-                setProfessionals(profs);
+                setProfessionals(clinicalProfs);
                 setSessions(sessList);
                 setUnits(unitsList);
                 setTemplates(tmpls);
@@ -110,9 +111,9 @@ export const EvolutionModal: React.FC<EvolutionModalProps> = ({
 
                 // Match logged-in user to professional if not set
                 let profId = selectedProfessionalId;
-                if (!profId && profs.length > 0) {
-                    const matchedProf = profs.find(p => p.email === systemUser?.email || p.name.toLowerCase() === systemUser?.name.toLowerCase());
-                    profId = matchedProf ? matchedProf.id : profs[0].id;
+                if (!profId && clinicalProfs.length > 0) {
+                    const matchedProf = clinicalProfs.find(p => p.email === systemUser?.email || p.name.toLowerCase() === systemUser?.name.toLowerCase());
+                    profId = matchedProf ? matchedProf.id : clinicalProfs[0].id;
                     setSelectedProfessionalId(profId);
                 }
 

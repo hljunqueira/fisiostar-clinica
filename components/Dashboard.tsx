@@ -11,7 +11,8 @@ import {
   Plus,
   Trash2,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { UnitId, Announcement, Patient, Session, Revenue } from '../types';
@@ -75,10 +76,20 @@ const Dashboard: React.FC<DashboardProps> = ({
     s.date.startsWith(thisMonth) && s.status === 'Realizada'
   ).length;
 
-  // Calculate revenue from REAL revenues table
-  const monthlyRevenue = revenues
-    .filter(r => r.revenueDate.startsWith(thisMonth))
+  // Calculate revenue from REAL revenues table + patient_plans paid in this month
+  const plansRevenue = filteredPatients.reduce((sum, p) => {
+    const plan = p.plan;
+    if (plan && plan.totalPaid && plan.paymentDate && plan.paymentDate.startsWith(thisMonth)) {
+      return sum + Number(plan.totalPaid);
+    }
+    return sum;
+  }, 0);
+
+  const directRevenue = revenues
+    .filter(r => r.revenueDate && r.revenueDate.startsWith(thisMonth))
     .reduce((sum, r) => sum + r.amount, 0);
+
+  const monthlyRevenue = directRevenue + plansRevenue;
 
   // Calculate no-show rate
   const totalSessions = filteredSessions.length;
@@ -127,22 +138,31 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   // Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [announcementToDelete, setAnnouncementToDelete] = useState<string | null>(null);
+  const [annTitle, setAnnTitle] = useState('');
+  const [annMessage, setAnnMessage] = useState('');
+  const [annRole, setAnnRole] = useState<'all' | 'admin' | 'secretary' | 'professional'>('all');
 
   const handleAddClick = () => {
-    const title = prompt('Título do aviso:');
-    if (!title) return;
-    const message = prompt('Mensagem:');
-    if (!message) return;
-    const role = prompt('Para quem? (all/admin/secretary/professional)', 'all');
+    setAnnTitle('');
+    setAnnMessage('');
+    setAnnRole('all');
+    setShowAddModal(true);
+  };
+
+  const handleSaveAnnouncement = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!annTitle.trim() || !annMessage.trim()) return;
 
     onAddAnnouncement({
       id: crypto.randomUUID(),
-      title,
-      message,
-      targetRole: (role as any) || 'all',
+      title: annTitle.trim(),
+      message: annMessage.trim(),
+      targetRole: annRole,
       createdAt: new Date().toISOString()
     });
+    setShowAddModal(false);
   };
 
   const handleDeleteClick = (id: string) => {
@@ -255,7 +275,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
             <h3 className="font-semibold text-gray-900 mb-4 border-t pt-5 border-gray-100 flex items-center gap-2">
               <Clock className="h-4 w-4 text-primary" />
-              Aulas Restantes
+              Sessões Restantes
             </h3>
             <div className="flex-1 overflow-y-auto space-y-3 max-h-80 pr-1 custom-scrollbar">
               {patientsWithPlans.map(patient => {
@@ -355,6 +375,82 @@ const Dashboard: React.FC<DashboardProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Add Announcement Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-100 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-base text-gray-900 flex items-center gap-2">
+                <Megaphone className="w-5 h-5 text-orange-500" />
+                Novo Aviso Geral
+              </h3>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAnnouncement} className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Título do Aviso</label>
+                <input
+                  type="text"
+                  required
+                  value={annTitle}
+                  onChange={e => setAnnTitle(e.target.value)}
+                  placeholder="Ex: Treinamento interno, feriado..."
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Mensagem</label>
+                <textarea
+                  required
+                  rows={3}
+                  value={annMessage}
+                  onChange={e => setAnnMessage(e.target.value)}
+                  placeholder="Descreva o comunicado detalhado..."
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">Destinatários</label>
+                <select
+                  value={annRole}
+                  onChange={e => setAnnRole(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs font-bold bg-white text-gray-800 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                >
+                  <option value="all">Todos os Usuários</option>
+                  <option value="admin">Apenas Administradores</option>
+                  <option value="secretary">Apenas Recepção / Secretaria</option>
+                  <option value="professional">Apenas Fisioterapeutas</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 border border-gray-200 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-50 transition-all cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all cursor-pointer"
+                >
+                  Publicar Aviso
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Confirm Modal */}
       <ConfirmModal

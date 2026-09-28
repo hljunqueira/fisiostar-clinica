@@ -31,8 +31,8 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
             try {
                 setLoading(true);
                 const [patientsData, sessionsData] = await Promise.all([
-                    patientsApi.getAll(),
-                    sessionsApi.getAll()
+                    patientsApi.getAll(currentUnit === 'ALL' ? undefined : currentUnit),
+                    sessionsApi.getAll(currentUnit === 'ALL' ? {} : { unitId: currentUnit })
                 ]);
                 setPatients(patientsData);
                 setSessions(sessionsData);
@@ -43,7 +43,7 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
             }
         }
         loadData();
-    }, []);
+    }, [currentUnit]);
 
     // Today's sessions (desconsidera canceladas, bloqueios de horário e deduplica por ID)
     const today = new Date().toISOString().split('T')[0];
@@ -70,8 +70,11 @@ const SecretaryDashboard: React.FC<SecretaryDashboardProps> = ({ currentUnit, an
     const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     const upcomingSessions = todaySessions.filter(s => (s.time || '').substring(0, 5) >= currentTime).slice(0, 5);
 
-    // Active patients
-    const activePatients = patients.filter(p => p.status === 'Active');
+    // Active patients (filtrados pela unidade selecionada)
+    const activePatients = patients.filter(p =>
+        (currentUnit === 'ALL' || p.unitId === currentUnit) &&
+        p.status === 'Active'
+    );
 
     // Patients with expiring plans (next 7 days)
     const expiringPlans = activePatients.filter(p => {

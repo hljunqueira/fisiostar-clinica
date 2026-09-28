@@ -12,6 +12,7 @@ interface AuthContextType {
     loading: boolean;
     signIn: (email: string, password: string) => Promise<void>;
     signOut: () => Promise<void>;
+    reloadCurrentUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,8 +27,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.auth.getSession()
             .then(({ data: { session } }) => {
                 setUser(session?.user ?? null);
-                if (session?.user) {
-                    loadSystemUser(session.user.email!);
+                if (session?.user?.email) {
+                    loadSystemUser(session.user.email);
                 } else {
                     setLoading(false);
                 }
@@ -42,8 +43,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Listen for auth changes
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             setUser(session?.user ?? null);
-            if (session?.user) {
-                loadSystemUser(session.user.email!);
+            if (session?.user?.email) {
+                loadSystemUser(session.user.email);
             } else {
                 setSystemUser(null);
                 setLoading(false);
@@ -52,6 +53,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         return () => subscription.unsubscribe();
     }, []);
+
+    // Ouvir alterações em tempo real (Supabase Realtime) na tabela system_users
+    useEffect(() => {
+        if (!user?.email) return;
+
+        const cleanEmail = user.email.trim().toLowerCase();
+
+        const channel = supabase
+            .channel('system_user_changes')
+            .on(
+                'postgres_changes',
+                {
+                    event: '*',
+                    schema: 'public',
+                    table: 'system_users'
+                },
+                (payload) => {
+                    const row: any = payload.new;
+                    if (row && row.email && row.email.trim().toLowerCase() === cleanEmail) {
+                        setSystemUser({
+                            id: row.id,
+                            name: row.name,
+                            email: row.email,
+                            role: row.role,
+                            unitId: row.unit_id,
+                            avatarUrl: row.avatar_url,
+                            customPermissions: row.custom_permissions || []
+                        });
+                    }
+                }
+            )
+            .subscribe((status) => {
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    supabase.removeChannel(channel);
+                }
+            });
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [user?.email]);
 
     async function loadSystemUser(email: string) {
         try {
@@ -62,6 +104,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setSystemUser(null);
         } finally {
             setLoading(false);
+        }
+    }
+
+    async function reloadCurrentUser() {
+        if (user?.email) {
+            await loadSystemUser(user.email);
         }
     }
 
@@ -83,7 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         assignedUnit: systemUser?.unitId ?? null,
         loading,
         signIn,
-        signOut
+        signOut,
+        reloadCurrentUser
     };
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -3,15 +3,17 @@ import { useSearchParams } from 'react-router-dom';
 import { ConfirmModal } from './ConfirmModal';
 import DataSeeder from './DataSeeder';
 import Units from './Units';
-import { UserRole, RolePermissions, PermissionKey, SystemUser, AuditLogItem, AuditCategory, getUserEffectivePermissions, PERMISSION_MODULES, Agreement } from '../src/types';
+import { UserRole, RolePermissions, PermissionKey, SystemUser, AuditLogItem, AuditCategory, getUserEffectivePermissions, PERMISSION_MODULES, Agreement, Unit } from '../src/types';
 import {
     Shield, UserCog, Save,
     Layout, Users, CreditCard, Plus, Trash2, Edit3, X, Tag, FileText, ArrowLeft, ChevronRight, UploadCloud,
     RotateCcw, LayoutDashboard, Briefcase, UserCheck, Calendar, Building2, Activity, Search, Filter,
-    Handshake, Phone, Mail, Percent, Check, AlertCircle, DoorClosed
+    Handshake, Phone, Mail, Percent, Check, AlertCircle, DoorClosed, CheckCircle2
 } from 'lucide-react';
-import { systemUsersApi, auditLogsApi, agreementsApi } from '../src/services/api';
+import { systemUsersApi, auditLogsApi, agreementsApi, unitsApi } from '../src/services/api';
+import { supabase } from '../src/lib/supabase';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '../src/contexts/AuthContext';
 import { RoomsSettingsTab } from './Settings/RoomsSettingsTab';
 import { AuditLogsTab } from './Settings/AuditLogsTab';
 import { ScheduleSettingsTab } from './Settings/ScheduleSettingsTab';
@@ -32,6 +34,7 @@ const Settings: React.FC<SettingsProps> = ({
     setRolePermissions,
     currentUserName = 'Administrador'
 }) => {
+    const { reloadCurrentUser, user: authUser } = useAuth();
     const [searchParams] = useSearchParams();
     const tabParam = searchParams.get('tab') || searchParams.get('section');
     const [activeSection, setActiveSection] = useState<SettingsSection>(null);
@@ -62,15 +65,21 @@ const Settings: React.FC<SettingsProps> = ({
     const [auditSearchQuery, setAuditSearchQuery] = useState<string>('');
     const [loading, setLoading] = useState(false);
 
+    const [availableUnits, setAvailableUnits] = useState<Unit[]>([]);
+    const [userSearchTerm, setUserSearchTerm] = useState('');
+    const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
+    const [userUnitFilter, setUserUnitFilter] = useState<string>('all');
+
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
     const selectedUser = selectedUserId ? users.find(u => u.id === selectedUserId) : null;
 
     // User Modal State (Reused for Create and Edit)
     const [isUserModalOpen, setIsUserModalOpen] = useState(false);
-    const [userFormData, setUserFormData] = useState<{ id?: string; name: string; email: string; role: UserRole }>({
+    const [userFormData, setUserFormData] = useState<{ id?: string; name: string; email: string; role: UserRole; unitId?: string }>({
         name: '',
         email: '',
-        role: 'secretary'
+        role: 'secretary',
+        unitId: ''
     });
     const [savingUser, setSavingUser] = useState(false);
 
@@ -96,9 +105,17 @@ const Settings: React.FC<SettingsProps> = ({
             try {
                 setLoading(true);
                 if (activeSection === 'users') {
-                    const usersData = await systemUsersApi.getAll();
+                    const [usersData, unitsData] = await Promise.all([
+                        systemUsersApi.getAll(),
+                        unitsApi.getAll()
+                    ]);
                     // Never show super admin in users list
-                    setUsers(usersData.filter(u => u.role !== 'super_admin'));
+                    const filteredUsers = usersData.filter(u => u.role !== 'super_admin');
+                    setUsers(filteredUsers);
+                    setAvailableUnits(unitsData || []);
+                    if (!selectedUserId && filteredUsers.length > 0) {
+                        setSelectedUserId(filteredUsers[0].id);
+                    }
                 } else if (activeSection === 'logs') {
                     const logsData = await auditLogsApi.getAll();
                     setAuditLogs(logsData);
@@ -116,6 +133,62 @@ const Settings: React.FC<SettingsProps> = ({
         loadData();
     }, [activeSection]);
 
+    // User Unit Change (Alterar Unidade do Colaborador)
+    const handleUnitChange = async (userId: string, newUnitId: string) => {
+        const user = users.find(u => u.id === userId);
+        if (!user) return;
+        const targetUnitId = newUnitId === '' ? undefined : newUnitId;
+        if (user.unitId === targetUnitId) return;
+
+        // Atualização otimista
+        setUsers(prev => prev.map(u => u.id === userId ? { ...u, unitId: targetUnitId } : u));
+
+        try {
+            await systemUsersApi.update(userId, { unitId: targetUnitId });
+
+            if (authUser?.email && user.email.toLowerCase() === authUser.email.toLowerCase()) {
+                await reloadCurrentUser();
+            }
+
+            // Sincronizar unidade se houver profissional vinculado
+            try {
+                const { data: prof } = await supabase
+                    .from('professionals')
+                    .select('id')
+                    .ilike('name', user.name)
+                    .maybeSingle();
+
+                if (prof && targetUnitId) {
+                    await supabase.from('professional_units').delete().eq('professional_id', prof.id);
+                    await supabase.from('professional_units').insert({
+                        professional_id: prof.id,
+                        unit_id: targetUnitId
+                    });
+                }
+            } catch (profErr) {
+                console.warn('Professional unit sync warning:', profErr);
+            }
+
+            const unitObj = availableUnits.find(u => u.id === targetUnitId);
+            const unitLabel = unitObj ? unitObj.name : 'Todas as Unidades (Global)';
+            toast.success(`Unidade de ${user.name} alterada para: ${unitLabel}`);
+
+            // Audit Log
+            await auditLogsApi.logAction({
+                userName: currentUserName,
+                userRole: currentRole,
+                category: 'users',
+                action: 'Unidade Alterada',
+                details: `Alterou a unidade do colaborador ${user.name} para ${unitLabel}.`
+            });
+        } catch (error) {
+            console.error('Error changing user unit:', error);
+            toast.error('Erro ao alterar unidade do colaborador');
+            // Reverter em caso de erro
+            setUsers(prev => prev.map(u => u.id === userId ? { ...u, unitId: user.unitId } : u));
+        }
+    };
+
     // User Role Change (Promover / Alterar Função)
     const handleRoleChange = async (userId: string, newRole: UserRole) => {
         const user = users.find(u => u.id === userId);
@@ -126,6 +199,10 @@ const Settings: React.FC<SettingsProps> = ({
         try {
             await systemUsersApi.update(userId, { role: newRole });
             await systemUsersApi.updatePermissions(userId, []);
+
+            if (authUser?.email && user.email.toLowerCase() === authUser.email.toLowerCase()) {
+                await reloadCurrentUser();
+            }
 
             const roleLabels: Record<UserRole, string> = {
                 admin: 'Administrador',
@@ -169,6 +246,11 @@ const Settings: React.FC<SettingsProps> = ({
 
         try {
             await systemUsersApi.updatePermissions(userId, updatedPermissions);
+
+            if (authUser?.email && user.email.toLowerCase() === authUser.email.toLowerCase()) {
+                await reloadCurrentUser();
+            }
+
             toast.success('Permissões atualizadas');
 
             // Audit Log
@@ -194,6 +276,11 @@ const Settings: React.FC<SettingsProps> = ({
 
         try {
             await systemUsersApi.updatePermissions(userId, []);
+
+            if (authUser?.email && user.email.toLowerCase() === authUser.email.toLowerCase()) {
+                await reloadCurrentUser();
+            }
+
             toast.success('Permissões restauradas para o padrão do cargo');
 
             // Audit Log
@@ -217,13 +304,15 @@ const Settings: React.FC<SettingsProps> = ({
                 id: user.id,
                 name: user.name,
                 email: user.email,
-                role: user.role
+                role: user.role,
+                unitId: user.unitId || ''
             });
         } else {
             setUserFormData({
                 name: '',
                 email: '',
-                role: 'secretary'
+                role: 'secretary',
+                unitId: availableUnits[0]?.id || ''
             });
         }
         setIsUserModalOpen(true);
@@ -236,12 +325,14 @@ const Settings: React.FC<SettingsProps> = ({
 
         setSavingUser(true);
         try {
+            const targetUnitId = userFormData.unitId ? userFormData.unitId : undefined;
             if (userFormData.id) {
                 // Update User
                 const updated = await systemUsersApi.update(userFormData.id, {
                     name: userFormData.name.trim(),
                     email: userFormData.email.trim(),
-                    role: userFormData.role
+                    role: userFormData.role,
+                    unitId: targetUnitId
                 });
 
                 setUsers(prev => prev.map(u => u.id === updated.id ? { ...u, ...updated } : u));
@@ -260,7 +351,8 @@ const Settings: React.FC<SettingsProps> = ({
                 const created = await systemUsersApi.create({
                     name: userFormData.name.trim(),
                     email: userFormData.email.trim(),
-                    role: userFormData.role
+                    role: userFormData.role,
+                    unitId: targetUnitId
                 });
 
                 setUsers(prev => [...prev, created]);
@@ -406,17 +498,12 @@ const Settings: React.FC<SettingsProps> = ({
 
     // Filtered Audit Logs
     const filteredAuditLogs = auditLogs.filter(log => {
-        // Never display super admin
-        if (log.userRole === 'super_admin' || log.userName.toLowerCase().includes('super admin')) {
-            return false;
-        }
-
         const matchesCategory = auditFilterCategory === 'all' || log.category === auditFilterCategory;
         const query = auditSearchQuery.toLowerCase();
         const matchesQuery = !query ||
             log.userName.toLowerCase().includes(query) ||
             log.action.toLowerCase().includes(query) ||
-            log.details.toLowerCase().includes(query);
+            (typeof log.details === 'string' && log.details.toLowerCase().includes(query));
 
         return matchesCategory && matchesQuery;
     });
@@ -432,7 +519,7 @@ const Settings: React.FC<SettingsProps> = ({
         system: { label: 'Sistema', color: 'bg-gray-50 text-gray-700 border-gray-200' }
     };
 
-    const isAdmin = currentRole === 'admin' || currentRole === 'superadmin';
+    const isAdmin = currentRole === 'admin' || currentRole === 'super_admin' || currentRole === 'superadmin' || authUser?.role === 'super_admin' || authUser?.role === 'admin';
 
     const renderMenu = () => (
         <div className="max-w-5xl mx-auto animate-fade-in">
@@ -602,120 +689,235 @@ const Settings: React.FC<SettingsProps> = ({
 
                         {/* --- VIEW: USERS & PERMISSIONS --- */}
                         {activeSection === 'users' && (
-                            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-                                {/* Left Side: User List */}
-                                <div className="xl:col-span-1 space-y-4">
-                                    <div className="flex justify-between items-center bg-gray-50/70 p-3 rounded-2xl border border-gray-100">
-                                        <div>
-                                            <h3 className="font-bold text-gray-900 text-xs uppercase tracking-wider">Colaboradores</h3>
-                                            <p className="text-[11px] text-gray-500">{users.length} usuários ativos no sistema</p>
+                            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                                {/* Left Side: User List with Search */}
+                                <div className="xl:col-span-1 space-y-3">
+                                    <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200/80 space-y-3">
+                                        <div className="flex justify-between items-center">
+                                            <div>
+                                                <h3 className="font-bold text-slate-900 text-xs uppercase tracking-wider">Colaboradores</h3>
+                                                <p className="text-[11px] text-slate-500">
+                                                    {users.length} usuários cadastrados
+                                                </p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleOpenUserModal()}
+                                                className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                                            >
+                                                <Plus className="w-3.5 h-3.5" /> Novo
+                                            </button>
                                         </div>
-                                        <button
-                                            onClick={() => handleOpenUserModal()}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                                        >
-                                            <Plus className="w-3.5 h-3.5" /> Novo
-                                        </button>
+
+                                        {/* Search Bar */}
+                                        <div className="relative">
+                                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                                            <input
+                                                type="text"
+                                                placeholder="Buscar por nome, e-mail ou unidade..."
+                                                value={userSearchTerm}
+                                                onChange={e => setUserSearchTerm(e.target.value)}
+                                                className="w-full pl-8 pr-7 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                            />
+                                            {userSearchTerm && (
+                                                <button
+                                                    onClick={() => setUserSearchTerm('')}
+                                                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            )}
+                                        </div>
                                     </div>
 
-                                    <div className="space-y-2 max-h-[600px] overflow-y-auto custom-scrollbar">
-                                        {users.map(user => {
-                                            const isSelected = selectedUserId === user.id;
-                                            return (
-                                                <div
-                                                    key={user.id}
-                                                    onClick={() => setSelectedUserId(user.id)}
-                                                    className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${isSelected
-                                                        ? 'bg-blue-50/80 border-blue-300 shadow-sm'
-                                                        : 'bg-white border-gray-200/80 hover:bg-gray-50'
-                                                        }`}
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                                                            {user.name.charAt(0)}
+                                    {/* Users List */}
+                                    <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1 custom-scrollbar">
+                                        {users
+                                            .filter(user => {
+                                                const q = userSearchTerm.trim().toLowerCase();
+                                                if (!q) return true;
+                                                const unitObj = availableUnits.find(u => u.id === user.unitId);
+                                                const unitName = unitObj ? unitObj.name.toLowerCase() : 'acesso global';
+                                                return (
+                                                    user.name.toLowerCase().includes(q) ||
+                                                    user.email.toLowerCase().includes(q) ||
+                                                    unitName.includes(q)
+                                                );
+                                            })
+                                            .map(user => {
+                                                const isSelected = selectedUserId === user.id;
+                                                const unitObj = availableUnits.find(u => u.id === user.unitId);
+                                                const unitDisplayName = unitObj
+                                                    ? unitObj.name.replace('FisioStar - ', '')
+                                                    : 'Acesso Global';
+
+                                                return (
+                                                    <div
+                                                        key={user.id}
+                                                        onClick={() => setSelectedUserId(user.id)}
+                                                        className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col gap-2 ${isSelected
+                                                            ? 'bg-blue-50/70 border-blue-400 shadow-xs ring-1 ring-blue-500/20'
+                                                            : 'bg-white border-slate-200/80 hover:bg-slate-50/70'
+                                                            }`}
+                                                    >
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <div className="flex items-center gap-2.5 min-w-0">
+                                                                <div className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center shrink-0 ${isSelected
+                                                                    ? 'bg-blue-600 text-white'
+                                                                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+                                                                    }`}>
+                                                                    {user.name.charAt(0).toUpperCase()}
+                                                                </div>
+                                                                <div className="min-w-0">
+                                                                    <p className="text-xs font-bold text-slate-900 truncate">{user.name}</p>
+                                                                    <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+                                                                </div>
+                                                            </div>
+
+                                                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${user.role === 'admin' ? 'bg-slate-900 text-white' :
+                                                                user.role === 'manager' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80' :
+                                                                    user.role === 'financial' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' :
+                                                                        user.role === 'professional' ? 'bg-blue-50 text-blue-700 border border-blue-200/80' :
+                                                                            'bg-amber-50 text-amber-700 border border-amber-200/80'
+                                                                }`}>
+                                                                {user.role === 'professional' ? 'Fisioterapeuta' :
+                                                                    user.role === 'manager' ? 'Gerente' :
+                                                                        user.role === 'financial' ? 'Financeiro' :
+                                                                            user.role === 'admin' ? 'Admin' :
+                                                                                'Secretária'}
+                                                            </span>
                                                         </div>
-                                                        <div>
-                                                            <p className="text-xs font-bold text-gray-900">{user.name}</p>
-                                                            <p className="text-[11px] text-gray-500">{user.email}</p>
+
+                                                        {/* Unit Indicator */}
+                                                        <div className="flex items-center gap-1.5 text-[11px] text-slate-500 pl-10">
+                                                            <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
+                                                            <span className="truncate">{unitDisplayName}</span>
                                                         </div>
                                                     </div>
+                                                );
+                                            })}
 
-                                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' :
-                                                        user.role === 'manager' ? 'bg-indigo-100 text-indigo-700' :
-                                                            user.role === 'financial' ? 'bg-emerald-100 text-emerald-700' :
-                                                                user.role === 'professional' ? 'bg-blue-100 text-blue-700' :
-                                                                    'bg-orange-100 text-orange-700'
-                                                        }`}>
-                                                        {user.role === 'professional' ? 'Profissional' :
-                                                            user.role === 'manager' ? 'Gerente' :
-                                                                user.role === 'financial' ? 'Financeiro' :
-                                                                    user.role === 'admin' ? 'Admin' :
-                                                                        'Secretária'}
-                                                    </span>
-                                                </div>
+                                        {users.filter(user => {
+                                            const q = userSearchTerm.trim().toLowerCase();
+                                            if (!q) return true;
+                                            const unitObj = availableUnits.find(u => u.id === user.unitId);
+                                            const unitName = unitObj ? unitObj.name.toLowerCase() : 'acesso global';
+                                            return (
+                                                user.name.toLowerCase().includes(q) ||
+                                                user.email.toLowerCase().includes(q) ||
+                                                unitName.includes(q)
                                             );
-                                        })}
+                                        }).length === 0 && (
+                                                <div className="p-6 text-center text-slate-400 text-xs bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                                                    Nenhum colaborador encontrado para a busca.
+                                                </div>
+                                            )}
                                     </div>
                                 </div>
 
-                                {/* Right Side: Permissions & Role Editing */}
+                                {/* Right Side: Permissions, Unit & Role Management */}
                                 <div className="xl:col-span-2">
                                     {selectedUser ? (
-                                        <div className="space-y-6">
-                                            {/* Header Info */}
-                                            <div className="bg-white p-5 rounded-2xl border border-gray-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-12 h-12 rounded-full bg-gray-100 text-gray-700 font-bold text-base flex items-center justify-center border border-gray-200">
-                                                        {selectedUser.name.charAt(0)}
+                                        <div className="space-y-5">
+                                            {/* Header Info & Configuration Card */}
+                                            <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                                    <div className="flex items-center gap-3.5">
+                                                        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 text-slate-800 font-bold text-base flex items-center justify-center border border-slate-200 shadow-xs shrink-0">
+                                                            {selectedUser.name.charAt(0).toUpperCase()}
+                                                        </div>
+                                                        <div>
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <h3 className="font-bold text-slate-900 text-base">{selectedUser.name}</h3>
+                                                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${selectedUser.role === 'admin' ? 'bg-slate-900 text-white' :
+                                                                    selectedUser.role === 'manager' ? 'bg-indigo-50 text-indigo-700 border border-indigo-200/80' :
+                                                                        selectedUser.role === 'financial' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/80' :
+                                                                            selectedUser.role === 'professional' ? 'bg-blue-50 text-blue-700 border border-blue-200/80' :
+                                                                                'bg-amber-50 text-amber-700 border border-amber-200/80'
+                                                                    }`}>
+                                                                    {selectedUser.role === 'professional' ? 'Profissional / Fisioterapeuta' :
+                                                                        selectedUser.role === 'manager' ? 'Gerente Operacional' :
+                                                                            selectedUser.role === 'financial' ? 'Financeiro / Contabilidade' :
+                                                                                selectedUser.role === 'admin' ? 'Administrador' :
+                                                                                    'Secretária / Recepção'}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-xs text-slate-500 mt-0.5">{selectedUser.email}</p>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <h3 className="font-bold text-gray-900 text-base">{selectedUser.name}</h3>
-                                                        <p className="text-xs text-gray-500">{selectedUser.email}</p>
+
+                                                    <div className="flex items-center gap-2 self-end sm:self-center">
+                                                        <button
+                                                            onClick={() => handleOpenUserModal(selectedUser)}
+                                                            className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl border border-slate-200 hover:border-blue-200 transition-all cursor-pointer"
+                                                            title="Editar cadastro do colaborador"
+                                                        >
+                                                            <Edit3 className="w-4 h-4" />
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() => handleDeleteUser(selectedUser.id)}
+                                                            className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-xl border border-slate-200 hover:border-red-200 transition-all cursor-pointer"
+                                                            title="Excluir usuário"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </button>
                                                     </div>
                                                 </div>
 
-                                                <div className="flex items-center gap-3">
-                                                    <label className="text-xs font-bold text-gray-500 uppercase tracking-wider hidden sm:block">Função / Cargo:</label>
-                                                    <select
-                                                        value={selectedUser.role}
-                                                        onChange={e => handleRoleChange(selectedUser.id, e.target.value as UserRole)}
-                                                        className="px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-bold text-gray-800 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-gray-300 transition-all"
-                                                    >
-                                                        <option value="secretary">🟣 Secretária / Recepção</option>
-                                                        <option value="manager">📈 Gerente Operacional</option>
-                                                        <option value="financial">💰 Financeiro / Contabilidade</option>
-                                                        <option value="admin">🔵 Administrador</option>
-                                                        <option value="professional">🟢 Profissional / Fisioterapeuta</option>
-                                                    </select>
+                                                {/* Selectors Row: Unit and Role */}
+                                                <div className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                    {/* Unit Selector */}
+                                                    <div>
+                                                        <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                                                            <Building2 className="w-3.5 h-3.5 text-blue-600" />
+                                                            Unidade / Filial
+                                                        </label>
+                                                        <select
+                                                            value={selectedUser.unitId || ''}
+                                                            onChange={e => handleUnitChange(selectedUser.id, e.target.value)}
+                                                            className="w-full px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 hover:border-blue-300 rounded-xl text-xs font-semibold text-slate-800 shadow-xs focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white outline-none cursor-pointer transition-all"
+                                                        >
+                                                            <option value="">Todas as Unidades (Acesso Global)</option>
+                                                            {availableUnits.map(unit => (
+                                                                <option key={unit.id} value={unit.id}>
+                                                                    {unit.name}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
 
-                                                    <button
-                                                        onClick={() => handleOpenUserModal(selectedUser)}
-                                                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all cursor-pointer"
-                                                        title="Editar cadastro do colaborador"
-                                                    >
-                                                        <Edit3 className="w-4 h-4" />
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() => handleDeleteUser(selectedUser.id)}
-                                                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all cursor-pointer"
-                                                        title="Excluir usuário"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
+                                                    {/* Role Selector */}
+                                                    <div>
+                                                        <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                                                            <Shield className="w-3.5 h-3.5 text-indigo-600" />
+                                                            Função / Cargo
+                                                        </label>
+                                                        <select
+                                                            value={selectedUser.role}
+                                                            onChange={e => handleRoleChange(selectedUser.id, e.target.value as UserRole)}
+                                                            className="w-full px-3 py-2 bg-slate-50 hover:bg-white border border-slate-200 hover:border-indigo-300 rounded-xl text-xs font-semibold text-slate-800 shadow-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none cursor-pointer transition-all"
+                                                        >
+                                                            <option value="secretary">Secretária / Recepção</option>
+                                                            <option value="manager">Gerente Operacional</option>
+                                                            <option value="financial">Financeiro / Contabilidade</option>
+                                                            <option value="admin">Administrador</option>
+                                                            <option value="professional">Profissional / Fisioterapeuta</option>
+                                                        </select>
+                                                    </div>
                                                 </div>
                                             </div>
 
+                                            {/* Permissions Section */}
                                             <div className="space-y-4">
-                                                <div className="flex justify-between items-center bg-blue-50/50 p-3 rounded-2xl border border-blue-100/80">
+                                                <div className="flex justify-between items-center bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
                                                     <div>
-                                                        <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider">Permissões de Acesso do Usuário</h4>
-                                                        <p className="text-[11px] text-blue-700/80 mt-0.5">As opções pré-marcadas são herdadas do cargo atual. Marque ou desmarque para personalizar.</p>
+                                                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Permissões de Acesso do Usuário</h4>
+                                                        <p className="text-[11px] text-slate-500 mt-0.5">As opções pré-marcadas são herdadas do cargo atual. Marque ou desmarque para personalizar.</p>
                                                     </div>
                                                     <button
                                                         type="button"
                                                         onClick={() => handleResetPermissions(selectedUser.id)}
-                                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-200 text-blue-700 hover:bg-blue-600 hover:text-white rounded-xl text-xs font-bold shadow-sm transition-all shrink-0 cursor-pointer"
+                                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 hover:text-slate-900 rounded-xl text-xs font-bold shadow-xs transition-all shrink-0 cursor-pointer"
                                                         title="Restaurar permissões para os padrões oficiais do cargo"
                                                     >
                                                         <RotateCcw className="w-3.5 h-3.5" />
@@ -728,90 +930,34 @@ const Settings: React.FC<SettingsProps> = ({
                                                         const IconComponent = module.id === 'dashboards' ? LayoutDashboard : module.id === 'operation' ? Calendar : Briefcase;
                                                         const userPermissions = getUserEffectivePermissions(selectedUser);
 
-                                                        const roleAllowedPermissionsMap: Record<UserRole, PermissionKey[]> = {
-                                                            professional: [
-                                                                'access_professional_portal',
-                                                                'view_schedule',
-                                                                'manage_patients'
-                                                            ],
-                                                            secretary: [
-                                                                'view_secretary_dashboard',
-                                                                'view_schedule',
-                                                                'manage_patients',
-                                                                'manage_plans'
-                                                            ],
-                                                            manager: [
-                                                                'view_manager_dashboard',
-                                                                'view_schedule',
-                                                                'manage_patients',
-                                                                'manage_team',
-                                                                'manage_units',
-                                                                'manage_plans'
-                                                            ],
-                                                            financial: [
-                                                                'view_financial_dashboard',
-                                                                'view_financials'
-                                                            ],
-                                                            admin: [
-                                                                'view_dashboard',
-                                                                'view_secretary_dashboard',
-                                                                'view_manager_dashboard',
-                                                                'view_financial_dashboard',
-                                                                'view_schedule',
-                                                                'manage_patients',
-                                                                'manage_team',
-                                                                'manage_units',
-                                                                'view_financials',
-                                                                'manage_plans',
-                                                                'edit_settings'
-                                                            ],
-                                                            super_admin: [
-                                                                'view_dashboard',
-                                                                'view_secretary_dashboard',
-                                                                'view_manager_dashboard',
-                                                                'view_financial_dashboard',
-                                                                'view_schedule',
-                                                                'manage_patients',
-                                                                'manage_team',
-                                                                'manage_units',
-                                                                'view_financials',
-                                                                'manage_plans',
-                                                                'edit_settings',
-                                                                'access_professional_portal'
-                                                            ]
-                                                        };
-
-                                                        const allowedForRole = roleAllowedPermissionsMap[selectedUser.role] || [];
-                                                        const filteredPermissions = module.permissions.filter(p => allowedForRole.includes(p.key));
-
-                                                        if (filteredPermissions.length === 0) return null;
+                                                        const filteredPermissions = module.permissions;
 
                                                         return (
-                                                            <div key={module.id} className="bg-white rounded-2xl border border-gray-200/80 shadow-sm overflow-hidden">
-                                                                <div className="px-4 py-2.5 bg-gray-50/70 border-b border-gray-100 flex items-center justify-between">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <div className="p-1 bg-blue-50 text-blue-600 rounded-md">
-                                                                            <IconComponent className="w-4 h-4" />
+                                                            <div key={module.id} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+                                                                <div className="px-4 py-3 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between">
+                                                                    <div className="flex items-center gap-2.5">
+                                                                        <div className="p-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg shadow-xs">
+                                                                            <IconComponent className="w-4 h-4 text-blue-600" />
                                                                         </div>
                                                                         <div>
-                                                                            <h5 className="text-xs font-bold text-gray-900">{module.title}</h5>
-                                                                            <p className="text-[10px] text-gray-500">{module.description}</p>
+                                                                            <h5 className="text-xs font-bold text-slate-900">{module.title}</h5>
+                                                                            <p className="text-[10px] text-slate-500">{module.description}</p>
                                                                         </div>
                                                                     </div>
                                                                 </div>
 
-                                                                <div className="divide-y divide-gray-100">
+                                                                <div className="divide-y divide-slate-100">
                                                                     {filteredPermissions.map(perm => {
                                                                         const isChecked = userPermissions.includes(perm.key);
                                                                         return (
-                                                                            <label key={perm.key} className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-50/80 transition-colors">
-                                                                                <div>
-                                                                                    <p className="text-xs font-semibold text-gray-800">{perm.label}</p>
-                                                                                    <p className="text-[11px] text-gray-500 mt-0.5">{perm.description}</p>
+                                                                            <label key={perm.key} className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-50/80 transition-colors">
+                                                                                <div className="pr-4">
+                                                                                    <p className="text-xs font-semibold text-slate-800">{perm.label}</p>
+                                                                                    <p className="text-[11px] text-slate-500 mt-0.5">{perm.description}</p>
                                                                                 </div>
                                                                                 <input
                                                                                     type="checkbox"
-                                                                                    className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                                                                                    className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500/20 cursor-pointer shrink-0"
                                                                                     checked={isChecked}
                                                                                     onChange={() => handleToggleUserPermission(selectedUser.id, perm.key)}
                                                                                 />
@@ -826,7 +972,7 @@ const Settings: React.FC<SettingsProps> = ({
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="flex flex-col items-center justify-center text-gray-400 py-16 bg-white rounded-2xl border border-gray-200/80">
+                                        <div className="flex flex-col items-center justify-center text-slate-400 py-16 bg-white rounded-2xl border border-slate-200/80">
                                             <UserCog className="w-12 h-12 mb-3 opacity-20" />
                                             <p className="text-sm font-semibold">Selecione um usuário à esquerda para visualizar e editar permissões.</p>
                                         </div>
@@ -997,24 +1143,40 @@ const Settings: React.FC<SettingsProps> = ({
                                     type="email"
                                     required
                                     className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder="ana@fisiostar.com"
+                                    placeholder="usuario@fisiostarclinica.com.br"
                                     value={userFormData.email}
                                     onChange={e => setUserFormData({ ...userFormData, email: e.target.value })}
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Função Padrão</label>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Função / Cargo</label>
                                 <select
-                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-gray-800"
                                     value={userFormData.role}
                                     onChange={e => setUserFormData({ ...userFormData, role: e.target.value as UserRole })}
                                 >
-                                    <option value="secretary">🟣 Secretária / Recepção</option>
-                                    <option value="manager">📈 Gerente Operacional</option>
-                                    <option value="financial">💰 Financeiro / Contabilidade</option>
-                                    <option value="admin">🔵 Administrador</option>
-                                    <option value="professional">🟢 Profissional / Fisioterapeuta</option>
+                                    <option value="secretary">Secretária / Recepção</option>
+                                    <option value="manager">Gerente Operacional</option>
+                                    <option value="financial">Financeiro / Contabilidade</option>
+                                    <option value="admin">Administrador</option>
+                                    <option value="professional">Profissional / Fisioterapeuta</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">Unidade / Filial</label>
+                                <select
+                                    className="w-full px-3.5 py-2 border border-gray-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer text-gray-800"
+                                    value={userFormData.unitId || ''}
+                                    onChange={e => setUserFormData({ ...userFormData, unitId: e.target.value })}
+                                >
+                                    <option value="">Todas as Unidades (Acesso Global)</option>
+                                    {availableUnits.map(unit => (
+                                        <option key={unit.id} value={unit.id}>
+                                            {unit.name}
+                                        </option>
+                                    ))}
                                 </select>
                             </div>
 

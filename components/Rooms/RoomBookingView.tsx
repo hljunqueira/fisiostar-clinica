@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UnitId, Room, RoomReservation, Professional, Unit, UserRole } from '../../types';
+import { UnitId, Room, RoomReservation, Professional, Unit, UserRole, isClinicalProfessional } from '../../types';
 import { roomsApi } from '../../src/services/rooms-api';
 import { professionalsApi, unitsApi } from '../../src/services/api';
 import { Calendar, Clock, Plus, Trash2, DoorClosed, AlertCircle, CheckCircle, ChevronLeft, ChevronRight, MessageSquare } from 'lucide-react';
@@ -65,7 +65,7 @@ export const RoomBookingView: React.FC<RoomBookingViewProps> = ({
         professionalsApi.getAll()
       ]);
       setUnits(unitsData);
-      setProfessionals(prosData);
+      setProfessionals(prosData.filter(isClinicalProfessional));
 
       const activeUnit = selectedUnitId || (currentUnit === 'ALL' ? (unitsData[0]?.id || '') : currentUnit);
       setSelectedUnitId(activeUnit);

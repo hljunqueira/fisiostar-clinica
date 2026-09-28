@@ -16,6 +16,7 @@ import DayListView from './Calendar/DayListView';
 import WeekListView from './Calendar/WeekListView';
 import AppointmentModal from './AppointmentModal';
 import { useAuth } from '../src/contexts/AuthContext';
+import { generateRepeatSessionDates } from '../src/utils/repetition';
 
 import { AnnouncementsView } from './AnnouncementsView';
 
@@ -118,11 +119,9 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({
 
     // Calendar Actions
     const handleSyncGoogle = () => {
-        setIsSyncing(true);
-        setTimeout(() => {
-            setIsSyncing(false);
-            toast.success('Sincronizado com Google Agenda!');
-        }, 1500);
+        toast('Integração com Google Calendar em configuração na VPS.', {
+            icon: 'ℹ️'
+        });
     };
 
     const handleAddSession = async (newSession: Session) => {
@@ -130,8 +129,34 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({
             // Force professional ID to be the current user
             const sessionToCreate = { ...newSession, professionalId: professional?.id || '' };
             await sessionsApi.create(sessionToCreate);
+
+            if (newSession.repeat && newSession.repeatCount && newSession.repeatCount > 1) {
+                const dates = generateRepeatSessionDates(
+                    newSession.date,
+                    newSession.repeatFrequency || 'weekly',
+                    newSession.repeatCount,
+                    newSession.repeatDays || []
+                );
+                const repeatDates = dates.slice(1);
+                if (repeatDates.length > 0) {
+                    const promises = repeatDates.map((dStr) =>
+                        sessionsApi.create({
+                            ...sessionToCreate,
+                            date: dStr,
+                            repeat: false,
+                            repeatWeekly: false
+                        })
+                    );
+                    await Promise.allSettled(promises);
+                    toast.success(`Agendamento e ${repeatDates.length} repetições criados com sucesso!`);
+                } else {
+                    toast.success('Agendamento criado com sucesso!');
+                }
+            } else {
+                toast.success('Agendamento criado com sucesso!');
+            }
+
             await loadData();
-            toast.success('Agendamento criado com sucesso!');
             setIsAppointmentModalOpen(false);
 
             // Navigate to date
@@ -238,7 +263,7 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({
         const monthTitle = formattedMonth.charAt(0).toUpperCase() + formattedMonth.slice(1);
         const unitName = unit ? unit.name : (units.length > 0 ? units[0].name : 'FisioStar');
         const profName = professional?.name || systemUser?.name || 'Profissional';
-        const profCrf = professional?.crf || 'CREFITO-3/67890-F';
+        const profCrf = professional?.crf || '-';
         const profSpecialty = professional?.specialty || 'Fisioterapia';
         const profEmail = professional?.email || systemUser?.email || '';
 
@@ -574,10 +599,21 @@ const ProfessionalPortal: React.FC<ProfessionalPortalProps> = ({
 
                         {mySessions.length > 0 ? (
                             <div className="divide-y divide-gray-100">
-                                {mySessions
-                                    .filter(s => new Date(s.date) >= new Date())
-                                    .sort((a, b) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime())
-                                    .slice(0, 5)
+                                {(() => {
+                                    const todayStr = new Date().toISOString().split('T')[0];
+                                    const nowTimeStr = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
+                                    return mySessions
+                                        .filter(s => {
+                                            if (!s.date) return false;
+                                            if (s.date > todayStr) return true;
+                                            if (s.date === todayStr) {
+                                                return (s.time || '').substring(0, 5) >= nowTimeStr;
+                                            }
+                                            return false;
+                                        })
+                                        .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`))
+                                        .slice(0, 5);
+                                })()
                                     .map(session => {
                                         const patient = patients.find(p => p.id === session.patientId);
                                         return (

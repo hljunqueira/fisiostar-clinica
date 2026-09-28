@@ -218,32 +218,10 @@ export const TotemCheckIn: React.FC = () => {
               </p>
             </div>
 
-            {/* Quick Demo Selector for testing or quick fallback */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 text-left">
-              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-                <span>Ou selecione seu nome (Demonstração):</span>
-                <span className="text-[10px] text-blue-400">Pacientes cadastrados</span>
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar">
-                {patients.slice(0, 6).map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => handleProcessPatient(p.id)}
-                    className="p-2.5 rounded-xl bg-white/10 hover:bg-blue-600 text-left text-xs font-bold text-white transition-all flex items-center gap-2 cursor-pointer"
-                  >
-                    <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
-                      {p.name.charAt(0)}
-                    </div>
-                    <span className="truncate">{p.name}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             <div className="flex justify-center gap-3">
               <button
                 onClick={() => setStep('cpf_input')}
-                className="text-xs text-blue-400 hover:text-blue-300 font-bold hover:underline cursor-pointer"
+                className="text-sm px-6 py-3 bg-white/10 hover:bg-white/15 border border-white/10 rounded-xl text-blue-300 hover:text-white font-bold transition-all cursor-pointer shadow-md"
               >
                 Problemas no reconhecimento facial? Digitar CPF
               </button>
@@ -310,7 +288,7 @@ export const TotemCheckIn: React.FC = () => {
                   </p>
                 </div>
 
-                <p className="text-xs text-gray-400">Tenha uma excelente aula / atendimento!</p>
+                <p className="text-xs text-gray-400">Tenha um excelente atendimento!</p>
 
                 <div className="pt-2">
                   <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">

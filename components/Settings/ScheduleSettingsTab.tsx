@@ -55,7 +55,7 @@ const COLOR_PRESETS = [
 ];
 
 export const ScheduleSettingsTab: React.FC<ScheduleSettingsTabProps> = ({ currentRole = 'admin' }) => {
-  const isAdmin = currentRole === 'admin' || currentRole === 'superadmin';
+  const isAdmin = currentRole === 'admin' || currentRole === 'super_admin' || currentRole === 'superadmin';
   const [config, setConfig] = useState<ScheduleViewConfig>(getSavedScheduleConfig());
   const [saving, setSaving] = useState(false);
   const [isColorModalOpen, setIsColorModalOpen] = useState(false);
